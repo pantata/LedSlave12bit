@@ -14,21 +14,6 @@
  *      B6 : IN spinac den/noc
  *
  *      D0 - D6: OUT pwm
- *
- * Provoz bez kontroleru:
- * Adresa TWI slouzi k nastaveni parametru
- * A0    A1     A2
- * 0     0      0       dle spinace BUTTON
- * 0     0      1       Po zapnuti 9 hodin, pak stmivani  dayTime = 9 * 3600 - 60, nightTime = 0
- * 0     1      0       Po zapnuti 10 hodin, pak stmivani dayTime = 10 * 3600 - 60, nightTime = 0
- * 0     1      1       Po zapnuti 12 hodin, pak stmivani dayTime = 12 * 3600 - 60, nightTime = 0
- * 1     0      0       Po zapnuti 9 hodin, pak 1 hod 1% nocni svetlo kanal 2  dayTime = 9 * 3600 - 60, nightTime = 1 * 3600
- * 1     0      1       Po zapnuti 10 hodin, pak 1 hod 1% nocni svetlo kanal 2 dayTime = 10 * 3600 - 60, nightTime = 1 * 3600
- * 1     1      0       Po zapnuti 12 hodin, pak 1 hod 1% nocni svetlo kanal 2 dayTime = 12 * 3600 - 60, nightTime = 1 * 3600
- * 1     1      1       Po zapnuti 12 hodin, pak 2 hod 1% nocni svetlo kanal 2 dayTime = 12 * 3600 - 60, nightTime = 2 * 3600
- *
- * Autostart po 24 hodinach od prvniho zapnuti
- *
  */
 
 // includes
@@ -123,6 +108,12 @@ unsigned long nightTime = 0;
 unsigned long setNightTime = 0;
 unsigned long timeTicks = 0;
 unsigned long startTime = 0;
+
+#define LED_ON     1
+#define LED_OFF    0
+#define LED_UP     2
+#define LED_DOWN   3
+
 
 //teplomer
 int8_t therm_ok = 1;
@@ -511,43 +502,6 @@ void set_fan(uint8_t pwm) {
 	}
 }
 
-void my_delay (uint16_t milliseconds)
-{
-    for (; milliseconds > 0; milliseconds--)
-        _delay_ms (1);
-}
-
-
-void setDayNightTime() {
-	switch ((twiaddr & 0b00001110) >> 1) {
-		case 0:
-			dayTime = 24L * 3600L; nightTime = 0;
-			break;
-		case 1:
-			dayTime = 9L * 3600L - 60L; nightTime = 0;
-			break;
-		case 2:
-			dayTime = 10L * 3600L - 60L; nightTime = 0;
-			break;
-		case 3:
-			dayTime = 12L * 3600L - 60L; nightTime = 0;
-			break;
-		case 4:
-			dayTime = 9L * 3600L - 60L; nightTime = 1 * 3600;
-			break;
-		case 5:
-			dayTime = 10L * 3600L - 60L; nightTime = 1 * 3600;
-			break;
-		case 6:
-			dayTime = 12L * 3600L - 60L; nightTime = 1 * 3600;
-			break;
-		default:
-			dayTime = 24L * 3600L; nightTime = 0;
-	}
-
-	setDayTime = dayTime; setNightTime = nightTime;
-}
-
 int main(void) {
 	cli();
 
@@ -680,90 +634,52 @@ int main(void) {
 		 }
 
 		/*
-		 *  Samostatny provoz bez kontroleru
-		 *
+		 *  Hlavni rizeni
+		 *	TODO: doplnit hlidani teploty
 		 */
-		 if (pwm_status != 0xFF ) {
-			static int16_t idx = 0;
+		if (pwm_status == 0xFF) {
+			if (!pwm_dirty) pwm_update();
+		} else {
+			 static int16_t idx = 0;
+			//testujeme zmenu stavu, pri prechodu vypnuto - zapnuto rozsvecujem, naopak stmivame
+			if ((PINB & (1 << PB6)) && (pwm_status == LED_ON) )  { //vypnuto
+					pwm_status = LED_DOWN;
 
-			if ((curTime - timeTicks) >= 1000) {
-				if (dayTime > 0 ) {
-					dayTime--;
-				} else if (nightTime > 0) {
-					nightTime--;
-				}
-				if (startTime > 0) {
-					startTime--;
-				}
-				timeTicks = millis();
 			}
 
-			if (((PINB & (1 << PB6)) && ((pwm_status == 2) || (pwm_status == 3) )) || (dayTime == 0) ){    // vypnuto
-				pwm_status = 1;
+			if (!(PINB & (1 << PB6)) && (pwm_status == LED_OFF) ) { //zapnuto
+					pwm_status = LED_UP;
 			}
 
-			if ((!(PINB & (1 << PB6)) && ((pwm_status == 0) || (pwm_status == 1) ) && (dayTime > 0)) || (startTime == 0) ) {  //zapnuto
-				dayTime = setDayTime;
-				nightTime = setNightTime;
-				startTime = 24L*3600L;
-				pwm_status = 3;
-			}
-
-			/*
-			 * Kontrola teploty a nastaveni jasu LED dle teloty
-			 */
-
-			if (therm_ok) {
-				if (!(PINB & (1 << PB6)) &&  (rawTemperature > 60)) {  //zapnuto
-					if (pwm_status == 2) pwm_status = 1; //stmivame, pokud je vysoka teplota
-				} else if (!(PINB & (1 << PB6)) &&  (rawTemperature < 45)) {
-					if (pwm_status == 2) pwm_status = 3;
-				} else if (!(PINB & (1 << PB6)) &&  (rawTemperature < 55)) {
-					if (pwm_status == 1) pwm_status = 2;
-				}
-			}
-
-
-			if ((curTime - pwmTicks) >= 937) {
-				if (pwm_status == 1) { //stmivani
-
-					pwm_setting[0] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[1] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[2] = pgm_read_word (& pwmtable_10[(idx<2) && (nightTime > 0)?2:idx]); //nocni osvetleni
-					pwm_setting[3] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[4] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[5] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[6] = pgm_read_word (& pwmtable_10[idx]);
+			if ((curTime - pwmTicks) >= 100) {
+				switch (pwm_status) {
+				case LED_UP:
+					for (uint8_t i=0; i<PWM_CHANNELS; i++) {
+						pwm_setting[0] = idx;
+					}
+					pwm_update();
+					if (idx < (PWM_STEPS - 1 )) {
+						idx ++;
+					} else {
+						pwm_status = LED_ON;
+					}
+					break;
+				case LED_DOWN:
+					for (uint8_t i=0; i<PWM_CHANNELS; i++) {
+						pwm_setting[0] = idx;
+					}
 					pwm_update();
 					if (idx > 0) {
-						idx--;
-					} else if (nightTime > 0) {
-						pwm_status = 1;
+						idx --;
 					} else {
-						pwm_status = 0;
+						pwm_status = LED_OFF;
 					}
-				}
-
-				if (pwm_status == 3) { //rozsveceni
-
-					pwm_setting[0] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[1] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[2] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[3] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[4] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[5] = pgm_read_word (& pwmtable_10[idx]);
-					pwm_setting[6] = pgm_read_word (& pwmtable_10[idx]);
+					break;
+				default:
 					pwm_update();
-
-					if (idx < STEPS-1) {
-						idx++;
-					} else {
-						pwm_status = 2;
-					}
 				}
 				pwmTicks = millis();
 			}
 		}
-		if (!pwm_dirty) pwm_update();
 	}
 }
