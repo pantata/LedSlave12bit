@@ -16,10 +16,13 @@
  *      D0 - D6: OUT pwm
  */
 
+#define DEBUG 0
+
 // includes
 #include <stddef.h>
 #include <string.h>
-#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
@@ -28,6 +31,9 @@
 #include <avr/wdt.h>
 #include "usiTwiSlave.h"
 
+#if DEBUG
+#include "dbg_putchar.h"
+#endif
 
 #define LOW_BYTE(x)    		(x & 0xff)
 #define HIGH_BYTE(x)       	((x >> 8) & 0xff)
@@ -46,6 +52,8 @@
 #define PWM_PORT      PORTD              // Port for PWM
 #define PWM_DDR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
+
+#define STEPS  PWM_STEPS
 
 #define T_PWM (F_CPU/(PWM_PRESCALER*F_PWM*PWM_STEPS)) // Systemtakte pro PWM-Takt
 
@@ -119,6 +127,7 @@ unsigned long startTime = 0;
 int8_t therm_ok = 1;
 uint8_t scratchpad[9];
 int8_t rawTemperature = 0;
+uint16_t crc = 0xFFFF;
 
 // pwm
 uint16_t pwm_timing[PWM_CHANNELS+1];          // Zeitdifferenzen der PWM Werte
@@ -127,7 +136,10 @@ uint16_t pwm_timing_tmp[PWM_CHANNELS+1];
 uint8_t  pwm_mask[PWM_CHANNELS+1];            // Bitmaske für PWM Bits, welche gelöscht werden sollen
 uint8_t  pwm_mask_tmp[PWM_CHANNELS+1];        // ändern uint16_t oder uint32_t für mehr Kanäle
 
-volatile uint16_t  pwm_setting[PWM_CHANNELS];           // Einstellungen für die einzelnen PWM-Kanäle
+uint16_t  pwm_setting[PWM_CHANNELS] = {0,0,0,0,0,0,0};           // Einstellungen für die einzelnen PWM-Kanäle
+volatile uint16_t  pwm_setting_buffer[PWM_CHANNELS] = {0,0,0,0,0,0,0};
+uint16_t  pwm_setting_buffer_1[PWM_CHANNELS] = {0,0,0,0,0,0,0};
+
 uint16_t  pwm_setting_tmp[PWM_CHANNELS+1];     // Einstellungen der PWM Werte, sortiert
                                               // ändern auf uint16_t für mehr als 8 Bit Auflösung
 volatile uint8_t pwm_setting_fan = 0;
@@ -148,7 +160,7 @@ volatile uint8_t pwm_dirty = 0;
  * Software PWM 10 bit
  *
  */
-void tausche_zeiger(void) {
+static void tausche_zeiger(void) {
     uint16_t *tmp_ptr16;
     uint8_t *tmp_ptr8;                          // ändern uint16_t oder uint32_t für mehr Kanäle
 
@@ -163,7 +175,7 @@ void tausche_zeiger(void) {
 // PWM Update, berechnet aus den PWM Einstellungen
 // die neuen Werte für die Interruptroutine
 
-void pwm_update(void) {
+static void pwm_update(void) {
 
     uint8_t i, j, k;
     uint8_t m1, m2, tmp_mask;                   // ändern uint16_t oder uint32_t für mehr Kanäle
@@ -256,12 +268,12 @@ void pwm_update(void) {
 
     pwm_sync=0;             // Sync wird im Interrupt gesetzt
     while(pwm_sync==0);
-
+    cli();
     // Zeiger tauschen
-    ATOMIC_BLOCK(ATOMIC_FORCEON) {
     	tausche_zeiger();
     	pwm_cnt_max = k;
-    }
+    sei();
+
 }
 
 // Timer 1 Output COMPARE B Interrupt
@@ -293,7 +305,7 @@ ISR(TIMER1_COMPA_vect) {
  *
  */
 
-uint8_t therm_reset()
+static uint8_t therm_reset()
 {
 
 	uint8_t i;
@@ -313,7 +325,7 @@ uint8_t therm_reset()
 	return i;
 }
 
-void therm_write_bit(uint8_t bit)
+static void therm_write_bit(uint8_t bit)
 {
 	ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		//Pull line low for 1uS
@@ -328,7 +340,7 @@ void therm_write_bit(uint8_t bit)
 	}
 }
 
-uint8_t therm_read_bit(void)
+static uint8_t therm_read_bit(void)
 {
 
 	uint8_t bit=0;
@@ -350,7 +362,7 @@ uint8_t therm_read_bit(void)
 	return bit;
 }
 
-uint8_t therm_read_byte(void)
+static uint8_t therm_read_byte(void)
 {
 	uint8_t i=8, n=0;
 	while(i--)
@@ -362,7 +374,7 @@ uint8_t therm_read_byte(void)
 	return n;
 }
 
-void therm_write_byte(uint8_t byte)
+static void therm_write_byte(uint8_t byte)
 {
 
 	uint8_t i=8;
@@ -382,21 +394,51 @@ void therm_write_byte(uint8_t byte)
 
 void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 
-	if (reg == 16) {
-		pwm_status = value;
-	} else {
+	switch (reg) {
+		case 16:
+			pwm_status = value;
+			break;
+		case 14:
+			BYTEHIGH(crc) = value;
+			break;
+		case 15:
+			BYTELOW(crc) = value;
+			pwm_dirty = 0;
+			break;
+		case 0:
+		case 2:
+		case 4:
+		case 6:
+		case 8:
+		case 10:
+		case 12:
+			BYTEHIGH(pwm_setting_buffer[reg/2]) = value;
+			break;
+		case 1:
+		case 3:
+		case 5:
+		case 7:
+		case 9:
+		case 11:
+		case 13:
+			BYTELOW(pwm_setting_buffer[reg/2]) = value;
+			break;
 
-		if((reg & 1)) {
-			//LOW BYTE
-			BYTELOW(pwm_setting[reg/2]) = value;
-			pwm_dirty = 0; //if (pwm_status == 0xFF) pwm_update();
-		} else {
-			//HIGH BYTE
-			BYTEHIGH(pwm_setting[reg/2]) = value;
-			pwm_dirty = 1;
-		}
+/*
+		default:
+			if((reg & 1)) {
+				//LOW BYTE
+				BYTELOW(pwm_setting[reg/2]) = value;
+				pwm_dirty = 0; //if (pwm_status == 0xFF) pwm_update();
+			} else {
+				//HIGH BYTE
+				BYTEHIGH(pwm_setting[reg/2]) = value;
+				pwm_dirty = 1;
+			}
+*/
 	}
-
+/*
+*/
 }
 
 uint8_t i2cReadFromRegister(uint8_t reg) {
@@ -479,18 +521,8 @@ unsigned long millis()
  * Hlavni smycka
  *
  */
-#define STEPS 64
 
-const uint16_t pwmtable_10[64] PROGMEM =
-{
-    0, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 9, 10,
-    11, 12, 13, 15, 17, 19, 21, 23, 26, 29, 32, 36, 40, 44, 49, 55,
-    61, 68, 76, 85, 94, 105, 117, 131, 146, 162, 181, 202, 225, 250,
-    279, 311, 346, 386, 430, 479, 534, 595, 663, 739, 824, 918, 1023
-};
-
-
-void set_fan(uint8_t pwm) {
+static void set_fan(uint8_t pwm) {
 	ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		if (pwm == 0) {
 			TCCR0A  &= ~(1 << COM0A1);
@@ -502,7 +534,27 @@ void set_fan(uint8_t pwm) {
 	}
 }
 
+static uint16_t crc16_update(uint16_t crc, uint8_t a) {
+  int i;
+
+  crc ^= a;
+  for (i = 0; i < 8; ++i)
+  {
+    if (crc & 1)
+      crc = (crc >> 1) ^ 0xA001;
+    else
+      crc = (crc >> 1);
+  }
+
+  return crc;
+}
+
 int main(void) {
+
+#if DEBUG
+	dbg_tx_init();
+#endif
+
 	cli();
 
 	/*
@@ -526,8 +578,13 @@ int main(void) {
 	PORTD = 0x00; 		// port D na LOW
 
 	//input a pullup, PB0=A0. PB1=A2, PB3=A3     na B6 je spinac ON/OFF, na B4 je DS1820
-	PORTB |= ( (1 << PB0) | (1 << PB1) | (1 << PB3)  | (1 << PB6) );
-	DDRB  &= (~(1 << PB0) & ~(1 << PB1) & ~(1 << PB3)  & ~(1 << PB6));
+#if DEBUG
+	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6); //| (1 << PB0) ;
+	DDRB  &= ~(1 << PB1) & ~(1 << PB3)  & ~(1 << PB6); //& ~(1 << PB0) ;
+#else
+	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6) | (1 << PB0) ;
+	DDRB  &= ~(1 << PB1) & ~(1 << PB3)  & ~(1 << PB6) & ~(1 << PB0) ;
+#endif
 
 
 	/*
@@ -544,6 +601,7 @@ int main(void) {
 	if (!(PINB & (1 << PB0))) {
 	twiaddr |=  (1 << 1);
 	}
+
 
 	usiTwiSlaveInit(twiaddr, i2cReadFromRegister, i2cWriteToRegister);
 
@@ -570,6 +628,7 @@ int main(void) {
     // Timer 1 OCRA1, als variablen Timer nutzen
 	TIMSK  |= (1 << OCIE1A);
     TCCR1B |= (1 << CS10) |  (1 << CS11);  //  Prescaler 64
+	//TCCR1B |= (1 << CS11);  //  Prescaler 8
 
 	sei();
 
@@ -592,7 +651,10 @@ int main(void) {
 		set_fan(255);
 	}
 
-
+#if DEBUG
+	char tempStr [8];
+	//dbg_putchar('A');dbg_putchar('\r');dbg_putchar('\n');
+#endif
 
 	while(1) {
 
@@ -602,6 +664,7 @@ int main(void) {
 		 /*
 		  * Mereni teploty
 		  */
+
 		 if (therm_ok) {
 			 if ((curTime - tempTicks1) >= 2000) {  //precteni teploty a start nove konverze
     			therm_reset();
@@ -617,13 +680,10 @@ int main(void) {
 				therm_write_byte(THERM_CMD_CONVERTTEMP);
 				tempTicks1 = millis();
 			}
-		}
-
-		/*
-		 * ventilator dle teploty
-		 * (x - in_min) * (out_max - out_min) / (50 - 20) + out_min;
-		 */
-		 if (therm_ok) {
+			 /*
+			 * ventilator dle teploty
+			 * (x - in_min) * (out_max - out_min) / (50 - 20) + out_min;
+			 */
 			 if (rawTemperature > 40) {
 				 set_fan(255);
 			 } else if (rawTemperature > 25) {
@@ -631,16 +691,72 @@ int main(void) {
 			 } else {
 				 set_fan(0);
 			 }
-		 }
+		}
 
 		/*
 		 *  Hlavni rizeni
 		 *	TODO: doplnit hlidani teploty
 		 */
-		if (pwm_status == 0xFF) {
-			if (!pwm_dirty) pwm_update();
-		} else {
-			 static int16_t idx = 0;
+		uint16_t xcrc = 0xFFFF;
+		static int16_t idx = 0;
+
+		switch (pwm_status) {
+		case  0xFF:
+				pwm_dirty = 1;
+		    	while(pwm_dirty == 1 || ((millis() - pwmTicks) < 100));    // cekame na data 100ms
+		    	pwmTicks = millis();
+
+		    	if (pwm_dirty == 0) {  //dostali jsme data
+					cli();
+
+						for (uint8_t i = 0; i < 7; i++) {
+							//kontrolujeme crc
+							xcrc = crc16_update(xcrc, LOW_BYTE(pwm_setting_buffer[i]));
+							xcrc = crc16_update(xcrc, HIGH_BYTE(pwm_setting_buffer[i]));
+						}
+						xcrc = crc16_update(xcrc, LOW_BYTE(crc));
+						xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
+
+						if (xcrc == 0) {
+							pwm_setting_buffer_1[0] = pwm_setting_buffer[0];
+							pwm_setting_buffer_1[1] = pwm_setting_buffer[1];
+							pwm_setting_buffer_1[2] = pwm_setting_buffer[2];
+							pwm_setting_buffer_1[3] = pwm_setting_buffer[3];
+							pwm_setting_buffer_1[4] = pwm_setting_buffer[4];
+							pwm_setting_buffer_1[5] = pwm_setting_buffer[5];
+							pwm_setting_buffer_1[6] = pwm_setting_buffer[6];
+
+						}
+					sei();
+		    	}
+
+				int16_t delta = 0;
+
+				delta = (pwm_setting_buffer_1[0]) - pwm_setting[0];
+				if (delta != 0)  pwm_setting[0] = pwm_setting[0] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer_1[1]) - pwm_setting[1];
+				if (delta != 0)  pwm_setting[1] = pwm_setting[1] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer_1[2]) - pwm_setting[2];
+				if (delta != 0)  pwm_setting[2] = pwm_setting[2] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer_1[3]) - pwm_setting[3];
+				if (delta != 0)  pwm_setting[3] = pwm_setting[3] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer_1[4]) - pwm_setting[4];
+				if (delta != 0)  pwm_setting[4] = pwm_setting[4] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer_1[5]) - pwm_setting[5];
+				if (delta != 0)  pwm_setting[5] = pwm_setting[5] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				delta = (pwm_setting_buffer[6]) - pwm_setting[6];
+				if (delta != 0)  pwm_setting[6] = pwm_setting[6] + (abs(delta)<2?delta:delta<0?-1:1);
+
+				pwm_update();
+				break;
+		case 0:
+		default:
 			//testujeme zmenu stavu, pri prechodu vypnuto - zapnuto rozsvecujem, naopak stmivame
 			if ((PINB & (1 << PB6)) && (pwm_status == LED_ON) )  { //vypnuto
 					pwm_status = LED_DOWN;
@@ -651,14 +767,14 @@ int main(void) {
 					pwm_status = LED_UP;
 			}
 
-			if ((curTime - pwmTicks) >= 100) {
+			if ((curTime - pwmTicks) >= 500) {
 				switch (pwm_status) {
 				case LED_UP:
 					for (uint8_t i=0; i<PWM_CHANNELS; i++) {
-						pwm_setting[0] = idx;
+						pwm_setting[i] = idx;
 					}
 					pwm_update();
-					if (idx < (PWM_STEPS - 1 )) {
+					if (idx < (STEPS - 1 )) {
 						idx ++;
 					} else {
 						pwm_status = LED_ON;
@@ -666,7 +782,7 @@ int main(void) {
 					break;
 				case LED_DOWN:
 					for (uint8_t i=0; i<PWM_CHANNELS; i++) {
-						pwm_setting[0] = idx;
+						pwm_setting[i] = idx;
 					}
 					pwm_update();
 					if (idx > 0) {
@@ -680,6 +796,7 @@ int main(void) {
 				}
 				pwmTicks = millis();
 			}
+			break;
 		}
 	}
 }
