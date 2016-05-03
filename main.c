@@ -47,9 +47,9 @@
 
 //PWM http://www.mikrocontroller.net/articles/Soft-PWM
 #define F_CPU         16000000L
-#define F_PWM         100L               // PWM-Freq
+#define F_PWM         120L               // PWM-Freq
 #define PWM_PRESCALER 8                  // Vorteiler für den Timer
-#define PWM_STEPS     1024               // PWM-Schritte pro Zyklus(1..256)
+#define PWM_STEPS     1024              // PWM-Schritte pro Zyklus(1..256)
 #define PWM_PORT      PORTD              // Port for PWM
 #define PWM_DDR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
@@ -157,12 +157,12 @@ uint8_t *main_ptr_mask = pwm_mask_tmp;          // ändern uint16_t oder uint32_
 volatile uint8_t pwm_status = 0;
 volatile uint8_t pwm_dirty = 1;
 
-/*
+
 static inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-*/
-#define map(x,in_min,in_max,out_min,out_max) ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
+
+//#define map(x,in_min,in_max,out_min,out_max) ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
 /*
  * Software PWM 10 bit
@@ -769,26 +769,26 @@ int main(void) {
 		    	}
 				break;
 		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne
-			if ((millis() - timeTicks) >= 1000) {
+			if ((millis() - timeTicks) >= 40) {
 				timeTicks = millis();
 				dayTime++;
 				if (dayTime > (24*3600L)) dayTime = 0;
 				int val, nval;
 				if (dayTime <= (4*3600L) ) {
 					//ramp up
-					val = map(dayTime,0,(4*3600L),0,1023);
+					val = map(dayTime,0,(4*3600L),0,511);
 					nval = val;
 				} else if ( (dayTime >= (setDayTime - (4*3600)) ) && (dayTime <= setDayTime)) {
 					//rampDown
-					nval = map(dayTime,setDayTime-(4*3600L),setDayTime,1023,setNightTime>0?100:0);
-					val = map(dayTime,setDayTime-(4*3600L),setDayTime,1023,0);
+					nval = map(dayTime,setDayTime-(4*3600L),setDayTime,511,setNightTime>0?100:0);
+					val = map(dayTime,setDayTime-(4*3600L),setDayTime,511,0);
 				} else if ((dayTime > setDayTime) && (dayTime <= (setDayTime + setNightTime) ) && (setNightTime > 0) ) {
 					//night ramp down
 					val = map(dayTime,setDayTime,setDayTime+setNightTime,100,0);
 					nval = val;
 				} else if ((dayTime > (4*3600)) && (dayTime < setDayTime-(4*3600L))) {
 					//day
-					val =1023;
+					val = 511;
 					nval = val;
 				} else {
 					//night
