@@ -16,7 +16,7 @@
  *      D0 - D6: OUT pwm
  */
 
-//#define DEBUG
+#define DEBUG
 
 // includes
 #include <stddef.h>
@@ -47,12 +47,14 @@
 
 //PWM http://www.mikrocontroller.net/articles/Soft-PWM
 #define F_CPU         16000000L
-#define F_PWM         120L               // PWM-Freq
+#define F_PWM         200L               // PWM-Freq
 #define PWM_PRESCALER 8                  // Vorteiler für den Timer
-#define PWM_STEPS     1024              // PWM-Schritte pro Zyklus(1..256)
+#define PWM_STEPS     512              // PWM-Schritte pro Zyklus(1..256)
 #define PWM_PORT      PORTD              // Port for PWM
 #define PWM_DDR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
+#define PWMNIGHT      19  //5% max hodnoty
+#define MAXPWM        63
 
 #define STEPS  PWM_STEPS
 
@@ -114,13 +116,21 @@ unsigned long setDayTime = 0;
 unsigned long nightTime = 0;
 unsigned long setNightTime = 0;
 unsigned long timeTicks = 0;
-//unsigned long startTime = 0;
+unsigned long time = 0;
 
-#define LED_ON     1
-#define LED_OFF    0
-#define LED_UP     2
-#define LED_DOWN   3
 
+#define HOUR  60L
+#define DAY  (24L*HOUR)
+#define RAMPUP  (4L*HOUR)
+#define RAMPDOWN  (4L*HOUR)
+
+const uint16_t pwmtable_10[64] PROGMEM =
+{
+    0, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 9, 10,
+    11, 12, 13, 15, 17, 19, 21, 23, 26, 29, 32, 36, 40, 44, 49, 55,
+    61, 68, 76, 85, 94, 105, 117, 131, 146, 162, 181, 202, 225, 250,
+    279, 311, 346, 386, 430, 479, 534, 595, 663, 739, 824, 918, 1023
+};
 
 //teplomer
 int8_t therm_ok = 1;
@@ -129,6 +139,8 @@ int8_t rawTemperature = 0;
 uint16_t crc = 0xFFFF;
 
 // pwm
+uint16_t val, nval = 0;
+
 uint16_t pwm_timing[PWM_CHANNELS+1];          // Zeitdifferenzen der PWM Werte
 uint16_t pwm_timing_tmp[PWM_CHANNELS+1];
 
@@ -156,11 +168,13 @@ uint8_t *main_ptr_mask = pwm_mask_tmp;          // ändern uint16_t oder uint32_
 
 volatile uint8_t pwm_status = 0;
 volatile uint8_t pwm_dirty = 1;
-
+uint16_t tmp;tmp2;
 
 static inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
+
+
 
 //#define map(x,in_min,in_max,out_min,out_max) ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
@@ -586,7 +600,7 @@ int main(void) {
 
 	//input a pullup, PB0=A0. PB1=A2, PB3=A3     na B6 je spinac ON/OFF, na B4 je DS1820
 #ifdef DEBUG
-	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6); //| (1 << PB0) ;
+	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6); //| (1 << PB0) ; PB0 je debug output
 	DDRB  &= ~(1 << PB1) & ~(1 << PB3)  & ~(1 << PB6); //& ~(1 << PB0) ;
 #else
 	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6) | (1 << PB0) ;
@@ -769,39 +783,42 @@ int main(void) {
 		    	}
 				break;
 		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne
-			if ((millis() - timeTicks) >= 40) {
-				timeTicks = millis();
-				dayTime++;
-				if (dayTime > (24*3600L)) dayTime = 0;
-				int val, nval;
-				if (dayTime <= (4*3600L) ) {
-					//ramp up
-					val = map(dayTime,0,(4*3600L),0,511);
-					nval = val;
-				} else if ( (dayTime >= (setDayTime - (4*3600)) ) && (dayTime <= setDayTime)) {
-					//rampDown
-					nval = map(dayTime,setDayTime-(4*3600L),setDayTime,511,setNightTime>0?100:0);
-					val = map(dayTime,setDayTime-(4*3600L),setDayTime,511,0);
-				} else if ((dayTime > setDayTime) && (dayTime <= (setDayTime + setNightTime) ) && (setNightTime > 0) ) {
-					//night ramp down
-					val = map(dayTime,setDayTime,setDayTime+setNightTime,100,0);
-					nval = val;
-				} else if ((dayTime > (4*3600)) && (dayTime < setDayTime-(4*3600L))) {
-					//day
-					val = 511;
-					nval = val;
-				} else {
-					//night
-					val  = 0;
-					nval = val;
-				}
-				pwm_setting[0] = val;
-				pwm_setting[1] = nval;
-				pwm_setting[2] = val;
-				pwm_setting[3] = val;
-				pwm_setting[4] = val;
-				pwm_setting[5] = nval;
-				pwm_setting[6] = val;
+				if ((time - timeTicks) >= 100)  {
+					timeTicks = time;
+
+					dayTime++;
+					if (dayTime > DAY) dayTime = 0;
+
+					if (dayTime <= RAMPUP ) {
+						//ramp up
+						val = map(dayTime,0,RAMPUP,0,MAXPWM);
+						nval = val;
+					} else if ( (dayTime >= (setDayTime - RAMPDOWN) ) && (dayTime <= setDayTime)) {
+						//rampDown
+						nval = map(dayTime,setDayTime-RAMPDOWN,setDayTime,MAXPWM,setNightTime>0?PWMNIGHT:0);
+						val = map(dayTime,setDayTime-RAMPDOWN,setDayTime,MAXPWM,0);
+					} else if ((dayTime > setDayTime) && (dayTime <= (setDayTime + setNightTime) ) && (setNightTime > 0) ) {
+						//night ramp down
+						val = map(dayTime,setDayTime,setDayTime+setNightTime,PWMNIGHT,0);
+						nval = val;
+					} else if ((dayTime > RAMPUP) && (dayTime < setDayTime-RAMPDOWN)) {
+						//day
+						val = MAXPWM;
+						nval = val;
+					} else {
+						//night
+						val  = 0;
+						nval = val;
+					}
+				tmp = pgm_read_word (& pwmtable_10[val]);
+				tmp2 = pgm_read_word (& pwmtable_10[nval]);
+				pwm_setting[0] = tmp;
+				pwm_setting[1] = tmp2;
+				pwm_setting[2] = tmp;
+				pwm_setting[3] = tmp;
+				pwm_setting[4] = tmp;
+				pwm_setting[5] = tmp2;
+				pwm_setting[6] = tmp;
 				pwm_update();
 			}
 		}
