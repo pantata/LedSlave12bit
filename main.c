@@ -47,9 +47,9 @@
 
 //PWM http://www.mikrocontroller.net/articles/Soft-PWM
 #define F_CPU         16000000L
-#define F_PWM         200L               // PWM-Freq
+#define F_PWM         120L               // PWM-Freq
 #define PWM_PRESCALER 8                  // Vorteiler für den Timer
-#define PWM_STEPS     512              // PWM-Schritte pro Zyklus(1..256)
+#define PWM_STEPS     1000               // PWM-Schritte pro Zyklus(1..256)
 #define PWM_PORT      PORTD              // Port for PWM
 #define PWM_DDR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
@@ -413,7 +413,6 @@ static void therm_write_byte(uint8_t byte)
  */
 
 void i2cWriteToRegister(uint8_t reg, uint8_t value) {
-
 	switch (reg) {
 		case 16:
 			pwm_status = value;
@@ -580,12 +579,12 @@ int main(void) {
 	/*
 	 * Watchdog enable 4sec
 	 */
-
+/*
 	wdt_reset();
 	MCUSR &= ~(1<<WDRF);
 	WDTCR |= (1<<WDCE) | (1<<WDE);
 	WDTCR  = (1<<WDE)  | (1<<WDP3);;
-
+*/
 	/*
 	 * Inicializace PWM
 	 */
@@ -613,23 +612,13 @@ int main(void) {
 	 * podle propojek na portech PB0, PB1, PB3
 	 */
 #ifdef DEBUG   //port B0 je debug output
-	if (!(PINB & (1 << PB3))) {
-	twiaddr |=  (1 << 3);
-	}
-	if (!(PINB & (1 << PB1))) {
-	twiaddr |=  (1 << 2);
-	}
+	if (!(PINB & (1 << PB3))) { twiaddr |=  (1 << 3); }
+	if (!(PINB & (1 << PB1))) { twiaddr |=  (1 << 2); }
 	twiaddr |=  (1 << 1);
 #else
-	if (!(PINB & (1 << PB3))) {
-	twiaddr |=  (1 << 3);
-	}
-	if (!(PINB & (1 << PB1))) {
-	twiaddr |=  (1 << 2);
-	}
-	if (!(PINB & (1 << PB0))) {
-	twiaddr |=  (1 << 1);
-	}
+	if (!(PINB & (1 << PB3))) { twiaddr |=  (1 << 3); }
+	if (!(PINB & (1 << PB1))) { twiaddr |=  (1 << 2); }
+	if (!(PINB & (1 << PB0))) { twiaddr |=  (1 << 1); }
 #endif
 
 	usiTwiSlaveInit(twiaddr, i2cReadFromRegister, i2cWriteToRegister);
@@ -667,25 +656,13 @@ int main(void) {
 	 */
 
 	if(therm_reset()) {
-				therm_ok = 0;
-#ifdef DEBUG
-	dbg_putchar('T');dbg_putchar('0');;dbg_putchar('\r');dbg_putchar('\n');
-#endif
+		therm_ok = 0;
+		set_fan(255);
 	} else {
-				therm_ok = 1;
-#ifdef DEBUG
-	dbg_putchar('T');dbg_putchar('1');;dbg_putchar('\r');dbg_putchar('\n');
-#endif
-	}
-
-	if (therm_ok) {
+		therm_ok = 1;
 		set_fan(0);
 		therm_write_byte(THERM_CMD_SKIPROM);
-
-
 		therm_write_byte(THERM_CMD_CONVERTTEMP);
-	} else {
-		set_fan(255);
 	}
 
 	/*
@@ -719,10 +696,8 @@ int main(void) {
 			setDayTime = 24L * 3600L; setNightTime = 0;
 	}
 
-
 	while(1) {
-
-		 wdt_reset();
+		 //wdt_reset();
 
 		 /*
 		  * Mereni teploty
@@ -743,10 +718,12 @@ int main(void) {
 				therm_write_byte(THERM_CMD_CONVERTTEMP);
 				tempTicks1 = millis();
 			}
+
 			 /*
 			 * ventilator dle teploty
 			 * (x - in_min) * (out_max - out_min) / (50 - 20) + out_min;
 			 */
+
 			 if (rawTemperature > 40) {
 				 set_fan(255);
 			 } else if (rawTemperature > 25) {
@@ -759,15 +736,18 @@ int main(void) {
 		/*
 		 *  Hlavni rizeni
 		 */
-		uint16_t xcrc = 0xFFFF;
+
+		uint16_t xcrc = 0xffff;
+
 		switch (pwm_status) {
 		case  0xFF:
 		    	if (pwm_dirty == 0) {  //dostali jsme data
 						for (uint8_t i = 0; i < 7; i++) {
 							//kontrolujeme crc
-							xcrc = crc16_update(xcrc, LOW_BYTE(pwm_setting_buffer[i]));
-							xcrc = crc16_update(xcrc, HIGH_BYTE(pwm_setting_buffer[i]));
+							xcrc = crc16_update(xcrc,LOW_BYTE(pwm_setting_buffer[i]));
+							xcrc = crc16_update(xcrc,HIGH_BYTE(pwm_setting_buffer[i]));
 						}
+
 						xcrc = crc16_update(xcrc, LOW_BYTE(crc));
 						xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
 
@@ -783,6 +763,7 @@ int main(void) {
 		    	}
 				break;
 		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne
+
 				if ((time - timeTicks) >= 100)  {
 					timeTicks = time;
 
