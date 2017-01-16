@@ -16,7 +16,9 @@
  *      D0 - D6: OUT pwm
  */
 
-#define DEBUG
+//#define DEBUG
+
+#define F_CPU         16000000L
 
 // includes
 #include <stddef.h>
@@ -44,30 +46,6 @@
 #define	bis(ADDRESS,BIT)	(ADDRESS & (1<<BIT))
 #define sbi(port,bit)       (port) |= (1 << (bit))
 #define cbi(port,bit)       (port) &= ~(1 << (bit))
-
-//PWM http://www.mikrocontroller.net/articles/Soft-PWM
-#define F_CPU         16000000L
-#define F_PWM         120L               // PWM-Freq
-#define PWM_PRESCALER 8                  // Vorteiler für den Timer
-#define PWM_STEPS     1000               // PWM-Schritte pro Zyklus(1..256)
-#define PWM_PORT      PORTD              // Port for PWM
-#define PWM_DDR       DDRD               // Register for PWM
-#define PWM_CHANNELS  7                  // count PWM channels
-#define PWMNIGHT      19  //5% max hodnoty
-#define MAXPWM        63
-
-#define STEPS  PWM_STEPS
-
-#define T_PWM (F_CPU/(PWM_PRESCALER*F_PWM*PWM_STEPS)) // Systemtakte pro PWM-Takt
-
-#if ((T_PWM*PWM_PRESCALER)<(111+5))
-    #error T_PWM be too small, must be enlarged or F_CPU f_PWM or PWM_STEPS reduced
-#endif
-
-#if ((T_PWM*PWM_STEPS)>65535)
-    #error Period of the PWM too big! F_PWM or PWM_PRESCALER increase.
-#endif
-
 
 #define TWIADDR 0b00100000
 //#define TWIADDR 0b00110000
@@ -141,183 +119,150 @@ uint16_t crc = 0xFFFF;
 // pwm
 uint16_t val, nval = 0;
 
-uint16_t pwm_timing[PWM_CHANNELS+1];          // Zeitdifferenzen der PWM Werte
-uint16_t pwm_timing_tmp[PWM_CHANNELS+1];
+#define LED_PORT      PORTD              // Port for PWM
+#define LED_DIR       DDRD               // Register for PWM
+#define PWM_CHANNELS  7                  // count PWM channels
+#define PWMNIGHT      19  //5% max hodnoty
+#define MAXPWM        63
+#define PWM_BITS   12
+#define LEDS       7
+#define MAX_LOOP   7
+#define LOOP_COUNT 8
 
-uint8_t  pwm_mask[PWM_CHANNELS+1];            // Bitmaske für PWM Bits, welche gelöscht werden sollen
-uint8_t  pwm_mask_tmp[PWM_CHANNELS+1];        // ändern uint16_t oder uint32_t für mehr Kanäle
+volatile uint8_t loop    = 0;
+volatile uint8_t bitmask = 0;
 
+const unsigned int tbl_loop_bitmask[LOOP_COUNT] =  {8, 9, 11, 10, 11, 11, 10, 11};
+const unsigned int tbl_loop_len[LOOP_COUNT]     =  {2044,4092,6140,8188,10236,12284,14332,16380};
 
-uint16_t  pwm_set[PWM_CHANNELS] = {0,0,0,0,0,0,0};           // Einstellungen für die einzelnen PWM-Kanäle
-volatile uint16_t  *pwm_setting=pwm_set;
+uint16_t ledValues[LEDS] = {0};
 
-uint16_t  pwm_sett_buff[PWM_CHANNELS] = {0,0,0,0,0,0,0};
-volatile uint16_t  *pwm_setting_buffer=pwm_sett_buff;
+uint8_t _data[PWM_BITS] = {0};      //double buffer for port values
+uint8_t _data_buff[PWM_BITS] = {0};
+uint8_t *_d;
+uint8_t *_d_b;
 
-uint16_t  pwm_setting_tmp[PWM_CHANNELS+1];     // Einstellungen der PWM Werte, sortiert
-                                              // ändern auf uint16_t für mehr als 8 Bit Auflösung
-
-volatile uint8_t pwm_cnt_max=1;               // Zählergrenze, Initialisierung mit 1 ist wichtig!
-volatile uint8_t pwm_sync;                    // Update jetzt möglich
-
-uint16_t *isr_ptr_time  = pwm_timing;
-uint16_t *main_ptr_time = pwm_timing_tmp;
-
-uint8_t *isr_ptr_mask  = pwm_mask;              // Bitmasken fuer PWM-Kanäle
-uint8_t *main_ptr_mask = pwm_mask_tmp;          // ändern uint16_t oder uint32_t für mehr Kanäle
-
+volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
-volatile uint8_t pwm_dirty = 1;
+volatile uint8_t inc_pwm_data = 1;
+
 uint16_t tmp;tmp2;
 
 static inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-
-
-//#define map(x,in_min,in_max,out_min,out_max) ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
-
 /*
- * Software PWM 10 bit
- *
+ * PWM / bit angle modulation
  */
-static inline void tausche_zeiger(void) {
-    uint16_t *tmp_ptr16;
-    uint8_t *tmp_ptr8;                          // ändern uint16_t oder uint32_t für mehr Kanäle
+// Timer1 handler.
+ISR(TIMER1_COMPB_vect) {
+	uint8_t r1, r2, r3;
+    bitmask = tbl_loop_bitmask[loop];
+	switch (loop) {
+	 case 0:
+		 r1 = _d[0];
+		 r2 = _d[1];
+		 r3 = _d[2];
 
-    tmp_ptr16 = isr_ptr_time;
-    isr_ptr_time = main_ptr_time;
-    main_ptr_time = tmp_ptr16;
-    tmp_ptr8 = isr_ptr_mask;
-    isr_ptr_mask = main_ptr_mask;
-    main_ptr_mask = tmp_ptr8;
-}
+		  __builtin_avr_delay_cycles(4L); //vyrovnani
 
-// PWM Update, berechnet aus den PWM Einstellungen
-// die neuen Werte für die Interruptroutine
+		 //bit 0
+		 LED_PORT = r1;
+		 __builtin_avr_delay_cycles(3L);
 
-static inline void pwm_update(void) {
+		 //bit 1
+		 LED_PORT = r2;
+		 __builtin_avr_delay_cycles(7L);
 
-    uint8_t i, j, k;
-    uint8_t m1, m2, tmp_mask;                   // ändern uint16_t oder uint32_t für mehr Kanäle
-    uint16_t min, tmp_set;                       // ändern auf uint16_t für mehr als 8 Bit Auflösung
+		 //bit 2
+		 LED_PORT = r3;
+		 __builtin_avr_delay_cycles(9L); //6 ticks na zpracovani
 
-    // PWM Maske für Start berechnen
-    // gleichzeitig die Bitmasken generieren und PWM Werte kopieren
+		 //bit 3
+		 LED_PORT = _d[3];
+		 __builtin_avr_delay_cycles(25L);
 
-    m1 = 1;
-    m2 = 0;
-    for(i=1; i<=(PWM_CHANNELS); i++) {
-        main_ptr_mask[i]=~m1;                       // Maske zum Löschen der PWM Ausgänge
-        pwm_setting_tmp[i] = pwm_setting[i-1];
-        if (pwm_setting_tmp[i]!=0) m2 |= m1;        // Maske zum setzen der IOs am PWM Start
-        m1 <<= 1;
-    }
-    main_ptr_mask[0]=m2;                            // PWM Start Daten
+		 //bit 4
+		 LED_PORT = _d[4];
+		 __builtin_avr_delay_cycles(57L);
 
-    // PWM settings sortieren; Einfügesortieren
+		 //bit 5
+		 LED_PORT = _d[5];
+		 __builtin_avr_delay_cycles(121L);
 
-    for(i=1; i<=PWM_CHANNELS; i++) {
-        min=PWM_STEPS-1;
-        k=i;
-        for(j=i; j<=PWM_CHANNELS; j++) {
-            if (pwm_setting_tmp[j]<min) {
-                k=j;                                // Index und PWM-setting merken
-                min = pwm_setting_tmp[j];
-            }
-        }
-        if (k!=i) {
-            // ermitteltes Minimum mit aktueller Sortiertstelle tauschen
-            tmp_set = pwm_setting_tmp[k];
-            pwm_setting_tmp[k] = pwm_setting_tmp[i];
-            pwm_setting_tmp[i] = tmp_set;
-            tmp_mask = main_ptr_mask[k];
-            main_ptr_mask[k] = main_ptr_mask[i];
-            main_ptr_mask[i] = tmp_mask;
-        }
-    }
+		 //bit 7a
+		 LED_PORT = _d[7];
+		 __builtin_avr_delay_cycles(121L);
 
-    // Gleiche PWM-Werte vereinigen, ebenso den PWM-Wert 0 löschen falls vorhanden
+		 //bit 6a
+		 LED_PORT = _d[6];
+		 __builtin_avr_delay_cycles(121L);
 
-    k=PWM_CHANNELS;             // PWM_CHANNELS Datensätze
-    i=1;                        // Startindex
+		 //bit 7b, 7c
+		 LED_PORT = _d[7];
+		 __builtin_avr_delay_cycles(249L);
 
-    while(k>i) {
-        while ( ((pwm_setting_tmp[i]==pwm_setting_tmp[i+1]) || (pwm_setting_tmp[i]==0))  && (k>i) ) {
+		 //bit 6b
+		 LED_PORT = _d[6];
+		 __builtin_avr_delay_cycles(121L);
 
-            // aufeinanderfolgende Werte sind gleich und können vereinigt werden
-            // oder PWM Wert ist Null
-            if (pwm_setting_tmp[i]!=0)
-                main_ptr_mask[i+1] &= main_ptr_mask[i];        // Masken vereinigen
+		 //bit 7d
+		 LED_PORT = _d[7];
+		 __builtin_avr_delay_cycles(121L);
 
-            // Datensatz entfernen,
-            // Nachfolger alle eine Stufe hochschieben
-            for(j=i; j<k; j++) {
-                pwm_setting_tmp[j] = pwm_setting_tmp[j+1];
-                main_ptr_mask[j] = main_ptr_mask[j+1];
-            }
-            k--;
-        }
-        i++;
-    }
+		 //bit 8
+		 LED_PORT = _d[8];
+		 OCR1B=tbl_loop_len[loop];
+		 break;
+	 case 1 ... 7:
+		 LED_PORT = _d[bitmask];
+		 OCR1B=tbl_loop_len[loop];
+		 break;
+	}
 
-    // letzten Datensatz extra behandeln
-    // Vergleich mit dem Nachfolger nicht möglich, nur löschen
-    // gilt nur im Sonderfall, wenn alle Kanäle 0 sind
-    if (pwm_setting_tmp[i]==0) k--;
-
-    // Zeitdifferenzen berechnen
-
-    if (k==0) { // Sonderfall, wenn alle Kanäle 0 sind
-        main_ptr_time[0]=(uint16_t)T_PWM*PWM_STEPS/2;
-        main_ptr_time[1]=(uint16_t)T_PWM*PWM_STEPS/2;
-        k=1;
-    }
-    else {
-        i=k;
-        main_ptr_time[i]=(uint16_t)T_PWM*(PWM_STEPS-pwm_setting_tmp[i]);
-        tmp_set=pwm_setting_tmp[i];
-        i--;
-        for (; i>0; i--) {
-            main_ptr_time[i]=(uint16_t)T_PWM*(tmp_set-pwm_setting_tmp[i]);
-            tmp_set=pwm_setting_tmp[i];
-        }
-        main_ptr_time[0]=(uint16_t)T_PWM*tmp_set;
-    }
-
-    // auf Sync warten
-
-    pwm_sync=0;             // Sync wird im Interrupt gesetzt
-    while(pwm_sync==0);
-    cli();
-    // Zeiger tauschen
-    	tausche_zeiger();
-    	pwm_cnt_max = k;
-    sei();
+	 //loop++;
+	 if(++loop > MAX_LOOP) {
+		 loop=0;
+		 //switch buffers
+		 if (newData) {
+			 uint8_t *tmp;
+			 tmp = _d;
+			 _d = _d_b;
+			 _d_b = tmp;
+			 newData = 0;
+		 }
+	 } else {
+		 //vyvazeni vetve
+		 __builtin_avr_delay_cycles(28L);
+	 }
 
 }
 
-// Timer 1 Output COMPARE B Interrupt
-ISR(TIMER1_COMPA_vect) {
-    static uint16_t pwm_cnt = 0;                // ändern auf uint16_t für mehr als 8 Bit Auflösung
-    uint8_t tmp;                                // ändern uint16_t oder uint32_t für mehr Kanäle
+static void _pwm_init(void) {
+ // Hardware init.
+ LED_DIR = 0xFF; //led pins output
+ LED_PORT = 0x00;   //off
+ OCR1A = tbl_loop_len[MAX_LOOP]+1;
+ TCCR1B = 1<<WGM12 | 1<<CS10; // CTC-mode, F_CPU / 1
+ TIMSK =  1<<OCIE1B;  		  //start timer
+}
 
-    OCR1A += isr_ptr_time[pwm_cnt];
-    tmp    = isr_ptr_mask[pwm_cnt];
+void pwm_update(void) {
 
-    if (pwm_cnt == 0) {
-        PWM_PORT = tmp;                         // Ports setzen zu Begin der PWM
-        										// zusätzliche PWM-Ports hier setzen
-        pwm_cnt++;
-    } else {
-        PWM_PORT &= tmp;                        // Ports löschen
-                                                // zusätzliche PWM-Ports hier setzen
-        if (pwm_cnt == pwm_cnt_max) {
-            pwm_sync = 1;                       // Update jetzt möglich
-            pwm_cnt  = 0;
-        } else pwm_cnt++;
-    }
+	//clear
+	memset(_d_b, 0, 12);
+	//rearrange values to ports
+	for(int i = 0; i < PWM_BITS; i++) {
+		for (int j = 0; j < LEDS; j++) {
+			_d_b[(PWM_BITS-1)-i] = (_d_b[(PWM_BITS-1)-i] << 1) | ((ledValues[j] >> ((PWM_BITS-1) - i)) & 0x01);
+		}
+	}
+
+	//wait for prev. data process
+	while (newData) {;};
+	//set new data flag
+	newData = 1;
 }
 
 /*
@@ -422,7 +367,7 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 			break;
 		case 15:
 			BYTELOW(crc) = value;
-			pwm_dirty = 0;
+			inc_pwm_data = 0;
 			break;
 		case 0:
 		case 2:
@@ -431,7 +376,7 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 		case 8:
 		case 10:
 		case 12:
-			BYTEHIGH(pwm_setting_buffer[reg/2]) = value;
+			BYTEHIGH(ledValues[reg/2]) = value;
 			break;
 		case 1:
 		case 3:
@@ -440,7 +385,7 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 		case 9:
 		case 11:
 		case 13:
-			BYTELOW(pwm_setting_buffer[reg/2]) = value;
+			BYTELOW(ledValues[reg/2]) = value;
 			break;
 
 /*
@@ -464,10 +409,10 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	if (reg >= 0 && reg <= 14) {
 		if((reg & 1)) {
 			//LOW BYTE
-			return BYTELOW(pwm_setting[reg/2]);
+			return BYTELOW(ledValues[reg/2]);
 		} else {
 			//HIGH BYTE
-			return BYTEHIGH(pwm_setting[reg/2]);
+			return BYTEHIGH(ledValues[reg/2]);
 		}
 	} else {
 		switch (reg) {
@@ -574,6 +519,9 @@ int main(void) {
 	dbg_tx_init();
 #endif
 
+    _d   = _data;
+    _d_b = _data_buff;
+
 	cli();
 
 	/*
@@ -585,17 +533,6 @@ int main(void) {
 	WDTCR |= (1<<WDCE) | (1<<WDE);
 	WDTCR  = (1<<WDE)  | (1<<WDP3);;
 */
-	/*
-	 * Inicializace PWM
-	 */
-	memset(pwm_set,0,sizeof(pwm_set));
-	memset(pwm_sett_buff,0,sizeof(pwm_set));
-
-	/*
-	 * Inicializace vzstupu
-	 */
-	PWM_DDR = 0xFF;  	// Port na vystup
-	PORTD = 0x00; 		// port D na LOW
 
 	//input a pullup, PB0=A0. PB1=A2, PB3=A3     na B6 je spinac ON/OFF, na B4 je DS1820
 #ifdef DEBUG
@@ -640,13 +577,7 @@ int main(void) {
 	//start pwm
 	OCR0A = 0;
 
-	/*
-	 *  Inicializace Timer1 pro sw PWM LED
-	 */
-    // Timer 1 OCRA1, als variablen Timer nutzen
-	TIMSK  |= (1 << OCIE1A);
-    //TCCR1B |= (1 << CS10) |  (1 << CS11);  //  Prescaler 64
-	TCCR1B |= (1 << CS11);  //  Prescaler 8
+	_pwm_init();
 
 	sei();
 
@@ -741,11 +672,11 @@ int main(void) {
 
 		switch (pwm_status) {
 		case  0xFF:
-		    	if (pwm_dirty == 0) {  //dostali jsme data
+		    	if (inc_pwm_data == 0) {  //dostali jsme data
 						for (uint8_t i = 0; i < 7; i++) {
 							//kontrolujeme crc
-							xcrc = crc16_update(xcrc,LOW_BYTE(pwm_setting_buffer[i]));
-							xcrc = crc16_update(xcrc,HIGH_BYTE(pwm_setting_buffer[i]));
+							xcrc = crc16_update(xcrc,LOW_BYTE(ledValues[i]));
+							xcrc = crc16_update(xcrc,HIGH_BYTE(ledValues[i]));
 						}
 
 						xcrc = crc16_update(xcrc, LOW_BYTE(crc));
@@ -753,13 +684,10 @@ int main(void) {
 
 						if (xcrc == 0) {
 							//TODO:  if not overheat
-							uint16_t *tmpptr =  pwm_setting;
-							pwm_setting = pwm_setting_buffer;
-							pwm_setting_buffer = tmpptr;
 							//TODO: else lower brightness
 							pwm_update();
 						}
-						pwm_dirty = 1;
+						inc_pwm_data = 1;
 		    	}
 				break;
 		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne
@@ -793,13 +721,13 @@ int main(void) {
 					}
 				tmp = pgm_read_word (& pwmtable_10[val]);
 				tmp2 = pgm_read_word (& pwmtable_10[nval]);
-				pwm_setting[0] = tmp;
-				pwm_setting[1] = tmp2;
-				pwm_setting[2] = tmp;
-				pwm_setting[3] = tmp;
-				pwm_setting[4] = tmp;
-				pwm_setting[5] = tmp2;
-				pwm_setting[6] = tmp;
+				ledValues[0] = tmp;
+				ledValues[1] = tmp2;
+				ledValues[2] = tmp;
+				ledValues[3] = tmp;
+				ledValues[4] = tmp;
+				ledValues[5] = tmp2;
+				ledValues[6] = tmp;
 				pwm_update();
 			}
 		}
