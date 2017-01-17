@@ -1,1 +1,9 @@
-/Release/
+Debug
+Release
+/.project
+core
+.settings
+/.cproject
+/.DS_Store
+Builds
+user.mk
