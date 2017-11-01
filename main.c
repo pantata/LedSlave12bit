@@ -42,6 +42,8 @@
 #include <avr/wdt.h>
 #include "usiTwiSlave.h"
 
+#include "twi_registry.h"
+
 #ifdef DEBUG
 #include "dbg_putchar.h"
 #endif
@@ -103,10 +105,11 @@ unsigned long setDayTime = 0;
 unsigned long nightTime = 0;
 unsigned long setNightTime = 0;
 unsigned long timeTicks = 0;
-unsigned long time = 0;
+unsigned long milis_time = 0;
+unsigned long i_timeTicks = 0;
 
 #ifdef DEBUG
-#define SEC  100L
+#define SEC  1000L
 #else
 #define SEC  1000L
 #endif
@@ -114,9 +117,14 @@ unsigned long time = 0;
 
 #define HOUR  3600L
 #define DAY  (24L*HOUR)
+
+#ifdef DEBUG
+#define RAMPUP  (256L)
+#define RAMPDOWN  (256L)
+#else
 #define RAMPUP  (4L*HOUR)
 #define RAMPDOWN  (4L*HOUR)
-
+#endif
 
 const uint8_t pwmtable1[170] PROGMEM =
 {
@@ -136,11 +144,11 @@ const uint16_t pwmtable2[86] PROGMEM = {
 	708,732,756,781,807,833,861,889,919,949,980,1013,1046,1081,1116,
 	1153,1191,1231,1271,1313,1357,1402,1448,1496,1545,1596,1649,1703,
 	1759,1818,1878,1940,2004,2070,2138,2209,2282,2357,2435,2515,2598,
-	2684,2773,2864,2959,3057,3158,3262,3370,3481,3596,3715,3837,3964,4095
+	2684,2773,2864,2959,3057,3158,3262,3370,3481,3596,3715,3837,3964,4000
 };
 
 //teplomer
-int8_t therm_ok = 1;
+int8_t therm_ok = 0;
 uint8_t scratchpad[9];
 int8_t rawTemperature = 0;
 uint16_t crc = 0xFFFF;
@@ -152,7 +160,7 @@ int16_t val, nval = 0;
 #define LED_DIR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
 #define PWMNIGHT      19  //5% max hodnoty
-#define MAXPWM        255 //63
+#define MAXPWM        256 //63
 #define PWM_BITS   12
 #define LEDS       7
 #define MAX_LOOP   7
@@ -389,77 +397,77 @@ static void therm_write_byte(uint8_t byte) {
 
 void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	switch (reg) {
-		case 16:
+		case reg_MASTER:
 			pwm_status = value;
 			break;
-		case 14:
+		case reg_CRC_H:
 			BYTEHIGH(crc) = value;
 			break;
-		case 15:
+		case reg_CRC_L:
 			BYTELOW(crc) = value;
-			inc_pwm_data = 0;
 			break;
-		case 0:
-		case 2:
-		case 4:
-		case 6:
-		case 8:
-		case 10:
-		case 12:
+		case reg_LED_H_0:
+		case reg_LED_H_1:
+		case reg_LED_H_2:
+		case reg_LED_H_3:
+		case reg_LED_H_4:
+		case reg_LED_H_5:
+		case reg_LED_H_6:
 			BYTEHIGH(incLedValues[reg/2]) = value;
 			break;
-		case 1:
-		case 3:
-		case 5:
-		case 7:
-		case 9:
-		case 11:
-		case 13:
+		case reg_LED_L_0:
+		case reg_LED_L_1:
+		case reg_LED_L_2:
+		case reg_LED_L_3:
+		case reg_LED_L_4:
+		case reg_LED_L_5:
+		case reg_LED_L_6:
 			BYTELOW(incLedValues[reg/2]) = value;
 			break;
-
-/*
-		default:
-			if((reg & 1)) {
-				//LOW BYTE
-				BYTELOW(pwm_setting[reg/2]) = value;
-				pwm_dirty = 0; //if (pwm_status == 0xFF) pwm_update();
-			} else {
-				//HIGH BYTE
-				BYTEHIGH(pwm_setting[reg/2]) = value;
-				pwm_dirty = 1;
-			}
-*/
+		case reg_DATA_OK:
+			inc_pwm_data = value;
+			break;
 	}
-/*
-*/
 }
 
 uint8_t i2cReadFromRegister(uint8_t reg) {
-	if (reg >= 0 && reg <= 14) {
-		if((reg & 1)) {
-			//LOW BYTE
-			return BYTELOW(ledValues[reg/2]);
-		} else {
-			//HIGH BYTE
-			return BYTEHIGH(ledValues[reg/2]);
+	uint8_t ret = 0x00;
+	switch (reg) {
+		case reg_LED_H_0:
+		case reg_LED_H_1:
+		case reg_LED_H_2:
+		case reg_LED_H_3:
+		case reg_LED_H_4:
+		case reg_LED_H_5:
+		case reg_LED_H_6:
+			ret =  HIGH_BYTE(ledValues[reg/2]);
+			break;
+		case reg_LED_L_0:
+		case reg_LED_L_1:
+		case reg_LED_L_2:
+		case reg_LED_L_3:
+		case reg_LED_L_4:
+		case reg_LED_L_5:
+		case reg_LED_L_6:
+			ret =   LOW_BYTE(ledValues[reg/2]);
+			break;
+		case reg_CRC_H:
+			ret =   HIGH_BYTE(crc);
+			break;
+		case reg_CRC_L:
+			ret =   LOW_BYTE(crc);
+			break;
+		case reg_MASTER:
+			ret =   pwm_status;
+			break;
+		case reg_THERM_STATUS:  //temperature status
+			ret =   therm_ok;
+			break;
+		case reg_RAW_THERM:
+			ret =   rawTemperature;
+			break;
 		}
-	} else {
-		switch (reg) {
-		case 16:
-			return pwm_status;
-			break;
-		case 17:  //temperature status
-			return therm_ok;
-			break;
-		case 18:
-			return rawTemperature;
-			break;
-		default:
-			return 0xFF;
-			break;
-		}
-	}
+	return ret;
 }
 
 
@@ -542,6 +550,11 @@ static uint16_t crc16_update(uint16_t crc, uint8_t a) {
   return crc;
 }
 
+/**************************************
+ * Main routine
+ *
+ *************************************/
+
 int main(void) {
 
 #ifdef DEBUG
@@ -551,6 +564,7 @@ int main(void) {
     _d   = _data;
     _d_b = _data_buff;
 
+    //disable irq
 	cli();
 
 	/*
@@ -631,7 +645,9 @@ int main(void) {
 	 * pocitame cas od zapnuti
 	 * dle nastavenych propojek
 	 */
-
+#ifdef DEBUG
+	setDayTime = (520); setNightTime = 0;
+#else
 	switch ((twiaddr & 0b00001110) >> 1) {
 		case 1:
 			setDayTime = (10L * HOUR); setNightTime = 0;
@@ -653,6 +669,16 @@ int main(void) {
 			break;
 		default:
 			setDayTime = (10L * HOUR); setNightTime = 0;
+	}
+
+#endif
+
+	//wait 30 sec for pwm_status from master
+	uint8_t wait_tmp=0;
+
+	while (pwm_status != 0xFF) {
+		_delay_ms(1000);
+		if (++wait_tmp > 20) break;
 	}
 
 	while(1) {
@@ -698,90 +724,102 @@ int main(void) {
 
 		uint16_t xcrc = 0xffff;
 
-		time = millis();
+		milis_time = millis();
+
 		switch (pwm_status) {
-		case  0xFF:
-		    	if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
-						for (uint8_t i = 0; i < 7; i++) {
-							xcrc = crc16_update(xcrc,LOW_BYTE(incLedValues[i]));
-							xcrc = crc16_update(xcrc,HIGH_BYTE(incLedValues[i]));
-						}
-
-						xcrc = crc16_update(xcrc, LOW_BYTE(crc));
-						xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
-
-						if (xcrc == 0) {
-							for(uint8_t x; x < LEDS; x++) {
-								//ulozime predchozi hodnoty
-								prevLedValues[x] = ledValues[x];
-								//zkopirujeme prichozi data
-								ledValues[x] = incLedValues[x];
+			case  0xFF:
+					if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
+							for (uint8_t i = 0; i < 7; i++) {
+								xcrc = crc16_update(xcrc,LOW_BYTE(incLedValues[i]));
+								xcrc = crc16_update(xcrc,HIGH_BYTE(incLedValues[i]));
 							}
-							//priznak startu interpolace
-							newValIsOK = 1;
-						}
-						inc_pwm_data = 1;
-		    	}
-				break;
-		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
-				 //TODO: fan off v noci
-				if ((time - timeTicks) >= SEC)  {
-					timeTicks = time;
 
-					dayTime++;
-					if (dayTime > DAY) dayTime = 0;
+							xcrc = crc16_update(xcrc, LOW_BYTE(crc));
+							xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
 
-					if (dayTime <= RAMPUP ) {
-						//ramp up
-						val = map(dayTime,0,RAMPUP,0,MAXPWM);
-						nval = val;
-					} else if ( (dayTime >= (setDayTime - RAMPDOWN) ) && (dayTime <= setDayTime)) {
-						//rampDown
-						nval = map(dayTime,setDayTime-RAMPDOWN,setDayTime,MAXPWM,setNightTime>0?PWMNIGHT:0);
-						val = map(dayTime,setDayTime-RAMPDOWN,setDayTime,MAXPWM,0);
-					} else if ((dayTime > setDayTime) && (dayTime <= (setDayTime + setNightTime) ) && (setNightTime > 0) ) {
-						//night ramp down
-						val = map(dayTime,setDayTime,setDayTime+setNightTime,PWMNIGHT,0);
-						nval = val;
-					} else if ((dayTime > RAMPUP) && (dayTime < setDayTime-RAMPDOWN)) {
-						//day
-						val = MAXPWM;
-						nval = val;
-					} else {
-						//night
-						val  = 0;
-						nval = val;
+							if (xcrc == 0) {
+								for(uint8_t x = 0; x < LEDS; x++) {
+									//ulozime predchozi hodnoty
+									//prevLedValues[x] = ledValues[x];
+									//zkopirujeme prichozi data
+									//ledValues[x] = incLedValues[x];
+									actLedValues[x] = incLedValues[x];
+								}
+								//priznak startu interpolace
+								//newValIsOK = 1;
+								pwm_update();
+							}
+							inc_pwm_data = 1;
 					}
-				tmp = val<170?pgm_read_word (& pwmtable1[val]):pgm_read_word (& pwmtable2[val]);
-				tmp2 = val<170?pgm_read_word (& pwmtable1[nval]):pgm_read_word (& pwmtable2[nval]);
 
-				for (uint8_t x = 0; x < LEDS; x++) {
-					actLedValues[x] = x == (NIGHT_LED1 || NIGHT_LED2) ?tmp2:tmp;
-					ledValues[x] = actLedValues[x];
+					/*
+					* TODO:
+					* interpolace na 1000 ms?
+					* mezi dvemi body je 25 hodnot
+					* funkce:
+					* _prevLedValues[x] = startovaci hodnota
+					* ledValues[x]  = nova hodnota
+					* actLedValues[x] = vypocitana hodnota, ktera jde do fce pwm_update
+					* actLedValues[x] = map(cas++,0,25,_prevLedValues[x],ledValues[x])
+					*/
+/*
+					if ( newValIsOK && (milis_time - i_timeTicks > 40)) {
+						i_timeTicks = milis_time;
+						for (uint8_t x=0;x < LEDS; x++) {
+							actLedValues[x]=map(interpolateTime,0,24,prevLedValues[x],ledValues[x]);
+							//prevLedValues[x] = actLedValues[x];
+						}
+						pwm_update();
+						interpolateTime++;
+						if (interpolateTime > 24) { newValIsOK = 0;interpolateTime=0;};
+					}
+*/
+					break;
+			default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
+					 //TODO: fan off v noci
+					 //TODO: opravit nval
+					if ((milis_time - timeTicks) >= SEC)  {
+						timeTicks = milis_time;
+
+						dayTime++;
+						if (dayTime > DAY) dayTime = 0;
+
+						if (dayTime <= RAMPUP ) {
+							//ramp up
+							val = map(dayTime,0,RAMPUP,0,MAXPWM);
+						} else if ( (dayTime >= (setDayTime - RAMPDOWN) ) && (dayTime <= setDayTime)) {
+							//rampDown
+							val = map(dayTime,setDayTime,setDayTime-RAMPDOWN,MAXPWM,0);
+						} else if ((dayTime > setDayTime) && (dayTime <= (setDayTime + setNightTime) ) && (setNightTime > 0) ) {
+							//night ramp down
+							val = map(dayTime,setDayTime,setDayTime+setNightTime,PWMNIGHT,0);
+						} else if ((dayTime > RAMPUP) && (dayTime < setDayTime-RAMPDOWN)) {
+							//day
+							val = MAXPWM;
+						} else {
+							//night
+							val  = 0;
+						}
+					if (val < 170) {
+						tmp = pgm_read_byte (& pwmtable1[val]);
+					} else if (val < 256) {
+						tmp = pgm_read_word (& pwmtable2[val-170]);
+					} else {
+						tmp = 0;
+					}
+
+					tmp = tmp > 4095?4095:tmp;
+
+					for (uint8_t x = 0; x < LEDS; x++) {
+
+						//ledValues[x] = tmp;
+						actLedValues[x] =  tmp;
+						//newValIsOK = 1;
+					}
+
+					pwm_update();
+
 				}
-				pwm_update();
-			}
-		}
-
-		/*
-		*
-		* interpolace na 1000 ms?
-		* mezi dvemi body je 25 hodnot
-		* funkce:
-		* _prevLedValues[x] = startovaci hodnota
-		* ledValues[x]  = nova hodnota
-		* actLedValues[x] = vypocitana hodnota, ktera jed do fce pwm_update
-		* actLedValues[x] = map(cas++,0,25,_prevLedValues[x],ledValues[x])
-		*/
-
-		if ( newValIsOK && (time - timeTicks > 40)) {
-			timeTicks = time;
-			for (uint8_t x=0;x < LEDS; x++) {
-				actLedValues[x]=map(interpolateTime,0,24,prevLedValues[x],ledValues[x]);
-			}
-			pwm_update();
-			interpolateTime++;
-			if (interpolateTime > 24) { newValIsOK = 0;interpolateTime=0;};
 		}
 	}
 }
