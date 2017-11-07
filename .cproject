@@ -72,4 +72,5 @@
 			<resource resourceType="PROJECT" workspacePath="/LedSlave10bit"/>
 		</configuration>
 	</storageModule>
+	<storageModule moduleId="org.eclipse.cdt.make.core.buildtargets"/>
 </cproject>
