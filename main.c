@@ -180,6 +180,9 @@ int16_t ledValues[LEDS] = {0};
 int16_t prevLedValues[LEDS] = {0};
 int16_t actLedValues[LEDS] = {0};
 
+int16_t *p_actLedValues = actLedValues;
+int16_t *p_incLedValues = incLedValues;
+
 int8_t interpolateTime = 0;
 
 uint8_t _data[PWM_BITS] = {0};      //double buffer for port values
@@ -303,7 +306,7 @@ void pwm_update(void) {
 	//rearrange values to ports
 	for(int i = 0; i < PWM_BITS; i++) {
 		for (int j = 0; j < LEDS; j++) {
-			_d_b[(PWM_BITS-1)-i] = (_d_b[(PWM_BITS-1)-i] << 1) | ((actLedValues[j] >> ((PWM_BITS-1) - i)) & 0x01);
+			_d_b[(PWM_BITS-1)-i] = (_d_b[(PWM_BITS-1)-i] << 1) | (((actLedValues[j]) >> ((PWM_BITS-1) - i)) & 0x01);
 		}
 	}
 
@@ -738,13 +741,11 @@ int main(void) {
 							xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
 
 							if (xcrc == 0) {
-								for(uint8_t x = 0; x < LEDS; x++) {
-									//ulozime predchozi hodnoty
-									//prevLedValues[x] = ledValues[x];
-									//zkopirujeme prichozi data
-									//ledValues[x] = incLedValues[x];
-									actLedValues[x] = incLedValues[x];
-								}
+								cli();
+								uint16_t *tmpptr =  p_actLedValues;
+								p_actLedValues = p_incLedValues;
+								p_incLedValues = p_actLedValues;
+								sei();
 								//priznak startu interpolace
 								//newValIsOK = 1;
 								pwm_update();
