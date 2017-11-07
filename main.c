@@ -306,7 +306,7 @@ void pwm_update(void) {
 	//rearrange values to ports
 	for(int i = 0; i < PWM_BITS; i++) {
 		for (int j = 0; j < LEDS; j++) {
-			_d_b[(PWM_BITS-1)-i] = (_d_b[(PWM_BITS-1)-i] << 1) | (((actLedValues[j]) >> ((PWM_BITS-1) - i)) & 0x01);
+			_d_b[(PWM_BITS-1)-i] = (_d_b[(PWM_BITS-1)-i] << 1) | (((p_actLedValues[j]) >> ((PWM_BITS-1) - i)) & 0x01);
 		}
 	}
 
