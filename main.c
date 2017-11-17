@@ -12,12 +12,22 @@
  *      B5, B7: SDA, SCL - i2c slave
  *      D0 - D6: OUT pwm
  *
- *      provoz bez kontroleru:
+ *      TODO: provoz bez kontroleru:
  *      po zapnuti napajeni stoupa jas po dobu jedne hodiny do maxima
+ *      - nastaveneho propojkou
  *      - delka sviceni je  urcena propojkou (10,11,12 hodin)
  *      - po uplynuti doby klesa jas na nulu po dobu jedne hodiny
+ *      - dalsi hodinu funguje nocni sviceni
  *      - externi spinaci hodiny je potreba nastavit tak, aby se vyply
  *      - po ukonceni celeho cyklu
+ *
+ *      - popojky A0 A1 A2
+ *        --0 12 hod
+ *        --1 10 hod max
+ *        00- 100%
+ *        01- 75%
+ *        10- 50%
+ *        11- 25%
  */
 
 //TODO:  if overheat lower brightness
@@ -40,9 +50,13 @@
 
 #include "twi_registry.h"
 
+
 #ifdef DEBUG
 #include "dbg_putchar.h"
 #endif
+
+#define MASTER    0xFF
+#define DEMO      0xde
 
 #define LOW_BYTE(x)    		(x & 0xff)
 #define HIGH_BYTE(x)       	((x >> 8) & 0xff)
@@ -67,7 +81,7 @@ uint8_t twiaddr = TWIADDR;
 /* Utils */
 #define THERM_INPUT_MODE() 		THERM_DDR&=~(1<<THERM_DQ)
 #define THERM_OUTPUT_MODE()		THERM_DDR|=(1<<THERM_DQ)
-#define THERM_LOW() 			THERM_PORT&=~(1<<THERM_DQ)
+#define THERM_LOW() 				THERM_PORT&=~(1<<THERM_DQ)
 #define THERM_HIGH() 			THERM_PORT|=(1<<THERM_DQ)
 
 #define THERM_CMD_CONVERTTEMP 0x44
@@ -94,7 +108,7 @@ uint8_t twiaddr = TWIADDR;
 #define SCRATCHPAD_CRC  8
 
 // rizeni chodu
-unsigned long tempTicks1 = 0;
+unsigned long tempTicks = 0;
 unsigned long pwmTicks = 0;
 unsigned long dayTime = 0;
 unsigned long setDayTime = 0;
@@ -207,6 +221,7 @@ static inline long map(long x, long in_min, long in_max, long out_min,
  * PWM / bit angle modulation
  */
 // Timer1 handler.
+
 ISR(TIMER1_COMPB_vect) {
 	uint8_t r1, r2, r3;
 	bitmask = tbl_loop_bitmask[loop];
@@ -290,6 +305,7 @@ ISR(TIMER1_COMPB_vect) {
 
 }
 
+
 static void _pwm_init(void) {
 	// Hardware init.
 	LED_DIR = 0xFF; //led pins output
@@ -331,14 +347,16 @@ static uint8_t therm_reset() {
 	{
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
-		_delay_us(330);
+	}
+		_delay_us(480);
+	ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		//Release line and wait for 60uS
 		THERM_INPUT_MODE();
 		_delay_us(40);
 		//Store line value and wait until the completion of 480uS period
 		i = (THERM_PIN & (1 << THERM_DQ));
 	}
-	_delay_us(330);
+	_delay_us(480);
 	//Return the value read from the presence pulse (0=OK, 1=WRONG)
 	return i;
 }
@@ -354,7 +372,7 @@ static void therm_write_bit(uint8_t bit) {
 		if (bit)
 			THERM_INPUT_MODE();
 		//Wait for 60uS and release the line
-		_delay_us(40);
+		_delay_us(60);
 		THERM_INPUT_MODE();
 	}
 }
@@ -378,7 +396,7 @@ static uint8_t therm_read_bit(void) {
 			bit = 1;
 	}
 	//Wait for 45uS to end and return read value
-	_delay_us(32);
+	_delay_us(45);
 	return bit;
 }
 
@@ -417,29 +435,29 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 		BYTELOW(crc) = value;
 		break;
 	case reg_LED_L_0 ... reg_LED_H_6:
-		(*((uint8_t *) (p_incLedValues)+reg)) = value;
+		(*((uint8_t *) (p_incLedValues) + reg)) = value;
 		break;
-/*
-	case reg_LED_H_0:
-	case reg_LED_H_1:
-	case reg_LED_H_2:
-	case reg_LED_H_3:
-	case reg_LED_H_4:
-	case reg_LED_H_5:
-	case reg_LED_H_6:
-		//BYTEHIGH(incLedValues[reg/2]) = value;
-		//break;
-	case reg_LED_L_0:
-	case reg_LED_L_1:
-	case reg_LED_L_2:
-	case reg_LED_L_3:
-	case reg_LED_L_4:
-	case reg_LED_L_5:
-	case reg_LED_L_6:
-		//BYTELOW(incLedValues[reg/2]) = value;
-		(*((uint8_t *) (p_incLedValues)+reg)) = value;
-		break;
-*/
+		/*
+		 case reg_LED_H_0:
+		 case reg_LED_H_1:
+		 case reg_LED_H_2:
+		 case reg_LED_H_3:
+		 case reg_LED_H_4:
+		 case reg_LED_H_5:
+		 case reg_LED_H_6:
+		 //BYTEHIGH(incLedValues[reg/2]) = value;
+		 //break;
+		 case reg_LED_L_0:
+		 case reg_LED_L_1:
+		 case reg_LED_L_2:
+		 case reg_LED_L_3:
+		 case reg_LED_L_4:
+		 case reg_LED_L_5:
+		 case reg_LED_L_6:
+		 //BYTELOW(incLedValues[reg/2]) = value;
+		 (*((uint8_t *) (p_incLedValues)+reg)) = value;
+		 break;
+		 */
 	case reg_DATA_OK:
 		inc_pwm_data = value;
 		break;
@@ -450,28 +468,28 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	uint8_t ret = 0x00;
 	switch (reg) {
 	case reg_LED_L_0 ... reg_LED_H_6:
-		ret = (*((uint8_t *) (p_actLedValues)+reg));
+		ret = (*((uint8_t *) (p_actLedValues) + reg));
 		break;
-/*
-	case reg_LED_H_1:
-	case reg_LED_H_2:
-	case reg_LED_H_3:
-	case reg_LED_H_4:
-	case reg_LED_H_5:
-	case reg_LED_H_6:
-		//ret = HIGH_BYTE(actLedValues[reg / 2]);
-		//break;
-	case reg_LED_L_0:
-	case reg_LED_L_1:
-	case reg_LED_L_2:
-	case reg_LED_L_3:
-	case reg_LED_L_4:
-	case reg_LED_L_5:
-	case reg_LED_L_6:
-		//ret = LOW_BYTE(ledValues[reg / 2]);
-		ret = (*((uint8_t *) (p_actLedValues)+reg));
-		break;
-*/
+		/*
+		 case reg_LED_H_1:
+		 case reg_LED_H_2:
+		 case reg_LED_H_3:
+		 case reg_LED_H_4:
+		 case reg_LED_H_5:
+		 case reg_LED_H_6:
+		 //ret = HIGH_BYTE(actLedValues[reg / 2]);
+		 //break;
+		 case reg_LED_L_0:
+		 case reg_LED_L_1:
+		 case reg_LED_L_2:
+		 case reg_LED_L_3:
+		 case reg_LED_L_4:
+		 case reg_LED_L_5:
+		 case reg_LED_L_6:
+		 //ret = LOW_BYTE(ledValues[reg / 2]);
+		 ret = (*((uint8_t *) (p_actLedValues)+reg));
+		 break;
+		 */
 	case reg_CRC_H:
 		ret = HIGH_BYTE(crc);
 		break;
@@ -495,8 +513,9 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
  * Milis()
  */
 
+#define PRESCALER  8
 #define clockCyclesToMicroseconds(a) ( ((a) * 1000L) / (F_CPU / 1000L) )
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))
+#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(PRESCALER * 256))
 #define MILLIS_INC (MICROSECONDS_PER_TIMER0_OVERFLOW / 1000)
 // the fractional number of milliseconds per timer0 overflow. we shift right
 // by three to fit these numbers into a byte. (for the clock speeds we care
@@ -633,8 +652,11 @@ int main(void) {
 	TIFR |= (1 << TOV0);
 	TIMSK |= (1 << TOIE0);
 
+#if (PRESCALER == 64L)
 	TCCR0B |= (1 << CS01) | (1 << CS00); // prescale 64
-
+#else
+	TCCR0B |= (1 << CS01); // prescale 8
+#endif
 	//fast PWM
 	TCCR0A |= (1 << COM0A1) | (1 << WGM00) | (1 << WGM01);
 
@@ -646,8 +668,15 @@ int main(void) {
 	sei();
 
 	/*
-	 * Inicializace teplomeru
+	 * test ventilatoru
 	 *
+	 */
+	set_fan(255);
+    _delay_ms(2000);
+
+	/*
+	 * Inicializace teplomeru
+	 * start koverze
 	 */
 
 	if (therm_reset()) {
@@ -658,6 +687,7 @@ int main(void) {
 		set_fan(0);
 		therm_write_byte(THERM_CMD_SKIPROM);
 		therm_write_byte(THERM_CMD_CONVERTTEMP);
+		while(!therm_read_bit());
 	}
 
 	/*
@@ -701,13 +731,26 @@ int main(void) {
 
 #endif
 
-	//wait 30 sec for pwm_status from master
+#define MASTER_TIMEOUT  2 //sec
+	//cekej  na pwm_status from master
 	uint8_t wait_tmp = 0;
 
-	while (pwm_status != 0xFF) {
-		_delay_ms(1000);
-		if (++wait_tmp > 20)
-			break;
+	//testujeme stav prepinace.
+	//pokud je sepnuto, pak jede demo provoz
+	//pokud je rozepnuto, oak cekame na master status
+	//pokud master status neprijde, jede autonomni provoz
+	//demo provoz lze pustit i z mastera zaslanim hodnoty 0xde
+	//do pwm_status
+	if (!(PINB & (1 << PB6))) {
+		//sepnuto, demo
+		pwm_status = DEMO;
+	} else {
+		//cekej na master status
+		while ((pwm_status != 0xFF) || (pwm_status != 0xDE)) {
+			_delay_ms(1000);
+			if (++wait_tmp > MASTER_TIMEOUT)
+				break;
+		}
 	}
 
 	while (1) {
@@ -718,34 +761,33 @@ int main(void) {
 		 */
 
 		if (therm_ok) {
-			if ((millis() - tempTicks1) >= 2000) { //precteni teploty a start nove konverze
+			if ((millis() - tempTicks) >= 1500) { //precteni teploty a start nove konverze
 				therm_reset();
 				therm_write_byte(THERM_CMD_SKIPROM);
 				therm_write_byte(THERM_CMD_RSCRATCHPAD);
-				for (uint8_t i = 0; i < 9; i++) {
-					scratchpad[i] = therm_read_byte();
-					;
-				}
-				rawTemperature = (int8_t) ((scratchpad[1] << 8) | scratchpad[0])
-						>> 1;
 
+				scratchpad[0]=therm_read_byte();
+				scratchpad[1]=therm_read_byte();
+				therm_reset();
+
+				rawTemperature = scratchpad[0]>>4;
+				rawTemperature |= (scratchpad[1]&0x7)<<4;
+
+				//start new conversion
 				therm_reset();
 				therm_write_byte(THERM_CMD_SKIPROM);
 				therm_write_byte(THERM_CMD_CONVERTTEMP);
-				tempTicks1 = millis();
+				tempTicks = millis();
 			}
 
 			/*
 			 * ventilator dle teploty
 			 * (x - in_min) * (out_max - out_min) / (50 - 20) + out_min;
 			 */
-
-			if (rawTemperature > 40) {
-				set_fan(255);
-			} else if (rawTemperature > 25) {
-				set_fan((rawTemperature - 20) * 10);
-			} else {
+			if (rawTemperature <= 25) {
 				set_fan(0);
+			} else {
+				set_fan(map(rawTemperature,25,50,120,255));
 			}
 		}
 
@@ -758,7 +800,7 @@ int main(void) {
 		milis_time = millis();
 
 		switch (pwm_status) {
-		case 0xFF:
+		case MASTER:
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 7; i++) {
 					xcrc = crc16_update(xcrc, LOW_BYTE(p_incLedValues[i]));
@@ -769,23 +811,45 @@ int main(void) {
 				xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
 
 				if (xcrc == 0) {
-					cli();
-					uint16_t *tmpptr = p_ledValues;
-					memcpy((uint8_t*)p_prevLedValues,(uint8_t*)p_ledValues,LEDS*2);
-					p_ledValues = p_incLedValues;
-					p_incLedValues = tmpptr;
-					sei();
-					//TODO: priznak startu interpolace
+					ATOMIC_BLOCK(ATOMIC_FORCEON)
+					{
+						uint16_t *tmpptr = p_ledValues;
+						memcpy((uint8_t*) p_prevLedValues,
+								(uint8_t*) p_ledValues, LEDS * 2);
+						p_ledValues = p_incLedValues;
+						p_incLedValues = tmpptr;
+					};
+					//priznak startu interpolace
 					newValIsOK = 1;
-					//pwm_update();
 				}
 				inc_pwm_data = 1;
 			}
 
 			break;
-		default: //autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
-				 //TODO: fan off v noci
-				 //TODO: opravit nval
+		case DEMO:
+			//demo provoz
+			//postupne  zapina kazdou led na hodnotu 0 .. 250 .. 0
+			for (uint8_t i = 0; i < LEDS; i++) {
+				set_fan(0);
+				for (uint8_t v = 0; v < 170; v++) {
+					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
+					_delay_ms(2);
+					pwm_update();
+				}
+				set_fan(255);
+				for (uint8_t v = 169; v > 0; v--) {
+					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
+					_delay_ms(2);
+					pwm_update();
+				}
+				actLedValues[i] = 0;
+			}
+			break;
+		default:
+			//pokud je sepnuty spinac a neprijde master prikaz,
+			//pak bezi autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
+			//TODO: fan off v noci
+			//TODO: opravit nval
 			if ((milis_time - timeTicks) >= SEC) {
 				timeTicks = milis_time;
 
@@ -823,24 +887,21 @@ int main(void) {
 					tmp = 0;
 				}
 
-				tmp = tmp > 4095 ? 4095 : tmp;
-
 				for (uint8_t x = 0; x < LEDS; x++) {
-
-					//ledValues[x] = tmp;
 					actLedValues[x] = tmp;
-					//newValIsOK = 1;
 				}
 
 				pwm_update();
 
 			}
+			break;
 		}
 
 		// interpolace hodnot
-#define ISTEPS 120   //5 sec as 40ms
+#define ISTEPS 100       //pocet kroku
+#define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
 		if (newValIsOK == 1) {
-			if ((milis_time - i_timeTicks) > 40) {
+			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < LEDS; x++) {
 					actLedValues[x] = map(interpolateTime, 0, ISTEPS,

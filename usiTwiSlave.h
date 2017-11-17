@@ -34,7 +34,7 @@ Change Activity:
 #ifndef _USI_TWI_SLAVE_H_
 #define _USI_TWI_SLAVE_H_
 
-#define buffer_size 16
+#define buffer_size 18
 /********************************************************************************
                                    prototypes
 ********************************************************************************/
