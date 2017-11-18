@@ -158,7 +158,7 @@ const uint16_t pwmtable2[86] PROGMEM = { 259, 267, 276, 285, 295, 304, 314, 325,
 //teplomer
 int8_t therm_ok = 0;
 uint8_t scratchpad[9];
-int8_t rawTemperature = 0;
+int8_t rawTemperature = 25;
 uint16_t crc = 0xFFFF;
 
 // pwm
@@ -212,11 +212,17 @@ int16_t tmp2;
 int delta;
 
 //linear interpolation
-static inline long map(long x, long in_min, long in_max, long out_min,
+static long map_minmax(long x, long in_min, long in_max, long out_min,
 		long out_max) {
-	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    long ret = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    return ret > out_max?out_max:ret < out_min?out_min:ret;
 }
 
+//linear interpolation
+static long map(long x, long in_min, long in_max, long out_min,
+		long out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 /*
  * PWM / bit angle modulation
  */
@@ -343,27 +349,24 @@ static uint8_t therm_reset() {
 
 	uint8_t i;
 	//Pull line low and wait for 480uS
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-	{
+	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
+		//cekani na casove okno
+		// 480us = cca 7680 cyklu, ktere by mely byt k dispozici
+	while (OCR1B < 12000){;};
+	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
-	}
 		_delay_us(480);
-	ATOMIC_BLOCK(ATOMIC_FORCEON) {
-		//Release line and wait for 60uS
 		THERM_INPUT_MODE();
 		_delay_us(40);
-		//Store line value and wait until the completion of 480uS period
 		i = (THERM_PIN & (1 << THERM_DQ));
-	}
+	//}
 	_delay_us(480);
 	//Return the value read from the presence pulse (0=OK, 1=WRONG)
 	return i;
 }
 
 static void therm_write_bit(uint8_t bit) {
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-	{
 		//Pull line low for 1uS
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
@@ -374,29 +377,23 @@ static void therm_write_bit(uint8_t bit) {
 		//Wait for 60uS and release the line
 		_delay_us(60);
 		THERM_INPUT_MODE();
-	}
 }
 
 static uint8_t therm_read_bit(void) {
 
 	uint8_t bit = 0;
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-	{
 		//Pull line low for 1uS
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
 		_delay_us(1);
-
 		//Release line and wait for 14uS
 		THERM_INPUT_MODE();
 		_delay_us(10);
-
 		//Read line value
 		if (THERM_PIN & (1 << THERM_DQ))
 			bit = 1;
-	}
-	//Wait for 45uS to end and return read value
-	_delay_us(45);
+		//Wait for 45uS to end and return read value
+		_delay_us(45);
 	return bit;
 }
 
@@ -411,11 +408,12 @@ static uint8_t therm_read_byte(void) {
 
 static void therm_write_byte(uint8_t byte) {
 
-	uint8_t i = 8;
-	while (i--) {
-		therm_write_bit(byte & 1); //Write actual bit and shift one position right to make the next bit ready
-		byte >>= 1;
-	}
+    uint8_t i=8;
+    while(i--){
+            //Write actual bit and shift one position right to make the next bit ready
+            therm_write_bit(byte&1);
+            byte>>=1;
+    }
 }
 
 /*
@@ -437,27 +435,6 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	case reg_LED_L_0 ... reg_LED_H_6:
 		(*((uint8_t *) (p_incLedValues) + reg)) = value;
 		break;
-		/*
-		 case reg_LED_H_0:
-		 case reg_LED_H_1:
-		 case reg_LED_H_2:
-		 case reg_LED_H_3:
-		 case reg_LED_H_4:
-		 case reg_LED_H_5:
-		 case reg_LED_H_6:
-		 //BYTEHIGH(incLedValues[reg/2]) = value;
-		 //break;
-		 case reg_LED_L_0:
-		 case reg_LED_L_1:
-		 case reg_LED_L_2:
-		 case reg_LED_L_3:
-		 case reg_LED_L_4:
-		 case reg_LED_L_5:
-		 case reg_LED_L_6:
-		 //BYTELOW(incLedValues[reg/2]) = value;
-		 (*((uint8_t *) (p_incLedValues)+reg)) = value;
-		 break;
-		 */
 	case reg_DATA_OK:
 		inc_pwm_data = value;
 		break;
@@ -470,26 +447,6 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	case reg_LED_L_0 ... reg_LED_H_6:
 		ret = (*((uint8_t *) (p_actLedValues) + reg));
 		break;
-		/*
-		 case reg_LED_H_1:
-		 case reg_LED_H_2:
-		 case reg_LED_H_3:
-		 case reg_LED_H_4:
-		 case reg_LED_H_5:
-		 case reg_LED_H_6:
-		 //ret = HIGH_BYTE(actLedValues[reg / 2]);
-		 //break;
-		 case reg_LED_L_0:
-		 case reg_LED_L_1:
-		 case reg_LED_L_2:
-		 case reg_LED_L_3:
-		 case reg_LED_L_4:
-		 case reg_LED_L_5:
-		 case reg_LED_L_6:
-		 //ret = LOW_BYTE(ledValues[reg / 2]);
-		 ret = (*((uint8_t *) (p_actLedValues)+reg));
-		 break;
-		 */
 	case reg_CRC_H:
 		ret = HIGH_BYTE(crc);
 		break;
@@ -563,7 +520,6 @@ static void set_fan(uint8_t pwm) {
 	{
 		if (pwm == 0) {
 			TCCR0A &= ~(1 << COM0A1);
-			PORTB &= ~(1 << PB3);
 		} else {
 			TCCR0A |= (1 << COM0A1);
 		}
@@ -605,12 +561,11 @@ int main(void) {
 	/*
 	 * Watchdog enable 4sec
 	 */
-	/*
+
 	 wdt_reset();
 	 MCUSR &= ~(1<<WDRF);
 	 WDTCR |= (1<<WDCE) | (1<<WDE);
 	 WDTCR  = (1<<WDE)  | (1<<WDP3);;
-	 */
 
 	//input a pullup, PB0=A0. PB1=A2, PB3=A3     na B6 je spinac ON/OFF, na B4 je DS1820
 #ifdef DEBUG
@@ -747,37 +702,44 @@ int main(void) {
 	} else {
 		//cekej na master status
 		while ((pwm_status != 0xFF) || (pwm_status != 0xDE)) {
+			wdt_reset();
 			_delay_ms(1000);
 			if (++wait_tmp > MASTER_TIMEOUT)
 				break;
 		}
 	}
-
 	while (1) {
-		//wdt_reset();
+		wdt_reset();
 
 		/*
 		 * Mereni teploty
 		 */
-
 		if (therm_ok) {
-			if ((millis() - tempTicks) >= 1500) { //precteni teploty a start nove konverze
-				therm_reset();
-				therm_write_byte(THERM_CMD_SKIPROM);
-				therm_write_byte(THERM_CMD_RSCRATCHPAD);
+			uint8_t tempread = 0;
+			if ( (millis() - tempTicks) >= 2000 )  { //precteni teploty a start nove konverze
+				if (tempread == 0) {
+					int8_t tmp_temp = 0;
+					therm_reset();
+					therm_write_byte(THERM_CMD_SKIPROM);
+					therm_write_byte(THERM_CMD_RSCRATCHPAD);
 
-				scratchpad[0]=therm_read_byte();
-				scratchpad[1]=therm_read_byte();
-				therm_reset();
-
-				rawTemperature = scratchpad[0]>>4;
-				rawTemperature |= (scratchpad[1]&0x7)<<4;
-
-				//start new conversion
+					scratchpad[0]=therm_read_byte();
+					scratchpad[1]=therm_read_byte();
+					tmp_temp = scratchpad[0]>>4;
+					tmp_temp |= (scratchpad[1]&0x7)<<4;
+					if (!((tmp_temp > (rawTemperature + 50)) || (tmp_temp < (rawTemperature - 50))) ) {
+						rawTemperature = tmp_temp;;
+					};
+					tempread = 1;
+				}
+			}
+			//start new conversion
+			if ( tempread ) {
 				therm_reset();
 				therm_write_byte(THERM_CMD_SKIPROM);
 				therm_write_byte(THERM_CMD_CONVERTTEMP);
 				tempTicks = millis();
+				tempread = 0;
 			}
 
 			/*
@@ -787,7 +749,7 @@ int main(void) {
 			if (rawTemperature <= 25) {
 				set_fan(0);
 			} else {
-				set_fan(map(rawTemperature,25,50,120,255));
+				set_fan(map_minmax(rawTemperature,25,50,120,255));
 			}
 		}
 
@@ -810,15 +772,12 @@ int main(void) {
 				xcrc = crc16_update(xcrc, LOW_BYTE(crc));
 				xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
 
-				if (xcrc == 0) {
-					ATOMIC_BLOCK(ATOMIC_FORCEON)
-					{
+				if (xcrc == 0)  {
 						uint16_t *tmpptr = p_ledValues;
 						memcpy((uint8_t*) p_prevLedValues,
 								(uint8_t*) p_ledValues, LEDS * 2);
 						p_ledValues = p_incLedValues;
 						p_incLedValues = tmpptr;
-					};
 					//priznak startu interpolace
 					newValIsOK = 1;
 				}
@@ -835,16 +794,19 @@ int main(void) {
 					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
 					_delay_ms(2);
 					pwm_update();
+					wdt_reset();
 				}
 				set_fan(255);
 				for (uint8_t v = 169; v > 0; v--) {
 					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
 					_delay_ms(2);
 					pwm_update();
+					wdt_reset();
 				}
 				actLedValues[i] = 0;
 			}
 			break;
+/*
 		default:
 			//pokud je sepnuty spinac a neprijde master prikaz,
 			//pak bezi autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
@@ -895,6 +857,7 @@ int main(void) {
 
 			}
 			break;
+*/
 		}
 
 		// interpolace hodnot
