@@ -368,6 +368,7 @@ static uint8_t therm_reset() {
 
 static void therm_write_bit(uint8_t bit) {
 		//Pull line low for 1uS
+		while (OCR1B < 5000){;};
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
 		_delay_us(1);
@@ -383,6 +384,7 @@ static uint8_t therm_read_bit(void) {
 
 	uint8_t bit = 0;
 		//Pull line low for 1uS
+	    while (OCR1B < 5000){;};
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
 		_delay_us(1);
