@@ -212,7 +212,7 @@ uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
 uint8_t *_d;
 uint8_t *_d_b;
-uint8_t newValIsOK = 0; //flag
+uint8_t interpolationStart = 0; //flag
 
 volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
@@ -858,7 +858,7 @@ int main(void) {
 					p_ledValues = p_incLedValues;
 					p_incLedValues = tmpptr;
 					//priznak startu interpolace
-					newValIsOK = 1;
+					interpolationStart = 1;
 				}
 				inc_pwm_data = 1;
 			}
@@ -949,7 +949,7 @@ int main(void) {
 		// interpolace hodnot
 #define ISTEPS 100       //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
-		if (newValIsOK == 1) {
+		if (interpolationStart == 1) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < LEDS; x++) {
@@ -958,7 +958,7 @@ int main(void) {
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
-					newValIsOK = 0;
+					interpolationStart = 0;
 					isteps = 0;
 				}
 				pwm_update();
