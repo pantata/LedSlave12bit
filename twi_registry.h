@@ -39,4 +39,12 @@
 #define reg_LED_5   10
 #define reg_LED_6   12
 
+#define reg_EFFECT   20
+#define reg_VERSION  21
+
+#define NO_EFFECT   0
+#define FLASH       1
+#define STORM       2
+
+
 #endif /* TWI_REGISTRY_H_ */

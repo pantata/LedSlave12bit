@@ -31,10 +31,12 @@
  */
 
 //TODO:  if overheat lower brightness
-//TODO: interpolation, 200 -> 250 = 50x 1000ms/50 > 50x +1 brightness
-//#define DEBUG
-#define F_CPU         16000000L
 
+//#define DEBUG
+
+#define VERSION       0x01
+
+#define F_CPU         16000000L
 // includes
 #include <stddef.h>
 #include <string.h>
@@ -57,6 +59,7 @@
 
 #define MASTER    0xFF
 #define DEMO      0xde
+#define EFFECT    0xef
 
 #define LOW_BYTE(x)    		(x & 0xff)
 #define HIGH_BYTE(x)       	((x >> 8) & 0xff)
@@ -72,12 +75,17 @@
 //#define TWIADDR 0b00110000
 uint8_t twiaddr = TWIADDR;
 
+/* Thermometer */
+#define THERM_ERROR_ERR 0x00
+#define THERM_ERROR_OK  0x01
+#define THERM_TEMP_ERR  0x80
+
 /* Thermometer Connections (At your choice) */
 #define THERM_PORT 	PORTB
 #define THERM_DDR 	DDRB
 #define THERM_PIN 	PINB
 #define THERM_DQ 	PB4
-
+#define TEMPERATURE_DELAY    2000
 /* Utils */
 #define THERM_INPUT_MODE() 		THERM_DDR&=~(1<<THERM_DQ)
 #define THERM_OUTPUT_MODE()		THERM_DDR|=(1<<THERM_DQ)
@@ -135,6 +143,9 @@ unsigned long i_timeTicks = 0;
 #define RAMPDOWN  (4L*HOUR)
 #endif
 
+const uint8_t version PROGMEM = VERSION;
+
+
 const uint8_t pwmtable1[170] PROGMEM = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2,
 		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 		3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7,
@@ -180,22 +191,22 @@ int16_t val, nval = 0;
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
 
-const unsigned int tbl_loop_bitmask[LOOP_COUNT] =
+const uint8_t  tbl_loop_bitmask[LOOP_COUNT] =
 		{ 8, 9, 11, 10, 11, 11, 10, 11 };
-const unsigned int tbl_loop_len[LOOP_COUNT] = { 2044, 4092, 6140, 8188, 10236,
+const uint16_t  tbl_loop_len[LOOP_COUNT] = { 2044, 4092, 6140, 8188, 10236,
 		12284, 14332, 16380 };
 
-uint16_t incLedValues[LEDS] = { 0, 0, 0, 0, 0, 0, 0 };
-uint16_t ledValues[LEDS] = { 0, 0, 0, 0, 0, 0, 0 };
-uint16_t prevLedValues[LEDS] = { 0, 0, 0, 0, 0, 0, 0 };
-uint16_t actLedValues[LEDS] = { 0, 0, 0, 0, 0, 0, 0 };
+uint16_t incLedValues[LEDS+1] = {0 };
+uint16_t ledValues[LEDS+1] = { 0 };
+uint16_t prevLedValues[LEDS+1] = { 0 };
+uint16_t actLedValues[LEDS] = { 0 };
 
 uint16_t *p_ledValues = ledValues;
 uint16_t *p_prevLedValues = prevLedValues;
 uint16_t *p_actLedValues = actLedValues;
 uint16_t *p_incLedValues = incLedValues;
 
-int8_t interpolateTime = 0;
+int8_t isteps = 0;
 
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
@@ -206,16 +217,18 @@ uint8_t newValIsOK = 0; //flag
 volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
 volatile uint8_t inc_pwm_data = 1;
+volatile uint8_t effect = 0;
 
 int16_t tmp;
 int16_t tmp2;
 int delta;
 
-//linear interpolation
-static long map_minmax(long x, long in_min, long in_max, long out_min,
-		long out_max) {
-    long ret = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-    return ret > out_max?out_max:ret < out_min?out_min:ret;
+//interpolace s mezemi min a max, 8bit
+static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
+		uint8_t out_min, uint8_t out_max) {
+	int16_t ret = (x - in_min) * (out_max - out_min) / (in_max - in_min)
+			+ out_min;
+	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
 
 //linear interpolation
@@ -345,6 +358,29 @@ void pwm_update(void) {
  *
  */
 
+uint8_t ds18b20crc8(uint8_t *data, uint8_t length) {
+	//Generate 8bit CRC for given data (Maxim/Dallas)
+
+	uint8_t i = 0;
+	uint8_t j = 0;
+	uint8_t mix = 0;
+	uint8_t crc = 0;
+	uint8_t byte = 0;
+
+	for (i = 0; i < length; i++) {
+		byte = data[i];
+
+		for (j = 0; j < 8; j++) {
+			mix = (crc ^ byte) & 0x01;
+			crc >>= 1;
+			if (mix)
+				crc ^= 0x8C;
+			byte >>= 1;
+		}
+	}
+	return crc;
+}
+
 static uint8_t therm_reset() {
 
 	uint8_t i;
@@ -428,17 +464,22 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	case reg_MASTER:
 		pwm_status = value;
 		break;
+/*
 	case reg_CRC_H:
 		BYTEHIGH(crc) = value;
 		break;
 	case reg_CRC_L:
 		BYTELOW(crc) = value;
 		break;
-	case reg_LED_L_0 ... reg_LED_H_6:
+*/
+	case reg_LED_L_0 ... reg_CRC_H:
 		(*((uint8_t *) (p_incLedValues) + reg)) = value;
 		break;
 	case reg_DATA_OK:
 		inc_pwm_data = value;
+		break;
+	case reg_EFFECT:
+		effect = value;
 		break;
 	}
 }
@@ -449,12 +490,14 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	case reg_LED_L_0 ... reg_LED_H_6:
 		ret = (*((uint8_t *) (p_actLedValues) + reg));
 		break;
+/*
 	case reg_CRC_H:
 		ret = HIGH_BYTE(crc);
 		break;
 	case reg_CRC_L:
 		ret = LOW_BYTE(crc);
 		break;
+*/
 	case reg_MASTER:
 		ret = pwm_status;
 		break;
@@ -463,6 +506,9 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 		break;
 	case reg_RAW_THERM:
 		ret = rawTemperature;
+		break;
+	case reg_VERSION:
+		ret = pgm_read_byte(version);
 		break;
 	}
 	return ret;
@@ -543,6 +589,27 @@ static uint16_t crc16_update(uint16_t crc, uint8_t a) {
 	return crc;
 }
 
+void led_flash() {
+	uint16_t l0, l1, l2;
+	l0 = actLedValues[0];
+	l1 = actLedValues[1];
+	l2 = actLedValues[2];
+	actLedValues[0] = 4095;
+	actLedValues[1] = 4095;
+	actLedValues[2] = 4095;
+	pwm_update();
+	_delay_ms(2);
+	actLedValues[0] = l0;
+	actLedValues[1] = l1;
+	actLedValues[2] = l2;
+	pwm_update();
+}
+
+void led_storm() {
+	return;
+}
+
+
 /**************************************
  * Main routine
  *
@@ -563,11 +630,8 @@ int main(void) {
 	/*
 	 * Watchdog enable 4sec
 	 */
-
-	 wdt_reset();
-	 MCUSR &= ~(1<<WDRF);
-	 WDTCR |= (1<<WDCE) | (1<<WDE);
-	 WDTCR  = (1<<WDE)  | (1<<WDP3);;
+	wdt_reset();
+	wdt_enable(WDTO_4S);
 
 	//input a pullup, PB0=A0. PB1=A2, PB3=A3     na B6 je spinac ON/OFF, na B4 je DS1820
 #ifdef DEBUG
@@ -642,6 +706,15 @@ int main(void) {
 	} else {
 		therm_ok = 1;
 		set_fan(0);
+
+		therm_reset();
+		therm_write_byte(THERM_CMD_SKIPROM);
+		therm_write_byte(THERM_CMD_WSCRATCHPAD);
+		therm_write_byte(0); //Th register
+		therm_write_byte(0); //TL register
+		therm_write_byte(0b00011111); //conf register, 9bit resolution
+
+		therm_reset();
 		therm_write_byte(THERM_CMD_SKIPROM);
 		therm_write_byte(THERM_CMD_CONVERTTEMP);
 		while(!therm_read_bit());
@@ -716,43 +789,41 @@ int main(void) {
 		/*
 		 * Mereni teploty
 		 */
-		if (therm_ok) {
-			uint8_t tempread = 0;
-			if ( (millis() - tempTicks) >= 2000 )  { //precteni teploty a start nove konverze
-				if (tempread == 0) {
-					int8_t tmp_temp = 0;
-					therm_reset();
-					therm_write_byte(THERM_CMD_SKIPROM);
-					therm_write_byte(THERM_CMD_RSCRATCHPAD);
+		if (therm_ok && ((millis() - tempTicks) >= TEMPERATURE_DELAY)) { //precteni teploty a start nove konverze
+			therm_reset();
+			therm_write_byte(THERM_CMD_SKIPROM);
+			therm_write_byte(THERM_CMD_RSCRATCHPAD);
 
-					scratchpad[0]=therm_read_byte();
-					scratchpad[1]=therm_read_byte();
-					tmp_temp = scratchpad[0]>>4;
-					tmp_temp |= (scratchpad[1]&0x7)<<4;
-					if (!((tmp_temp > (rawTemperature + 50)) || (tmp_temp < (rawTemperature - 50))) ) {
-						rawTemperature = tmp_temp;;
-					};
-					tempread = 1;
-				}
-			}
-			//start new conversion
-			if ( tempread ) {
-				therm_reset();
-				therm_write_byte(THERM_CMD_SKIPROM);
-				therm_write_byte(THERM_CMD_CONVERTTEMP);
-				tempTicks = millis();
-				tempread = 0;
+			uint8_t i = 0;
+			do {
+				scratchpad[i] = therm_read_byte();
+			} while (++i < 9);
+
+			if (ds18b20crc8(scratchpad, 8) == scratchpad[8]) {
+				rawTemperature = scratchpad[0] >> 4;
+				rawTemperature |= (scratchpad[1] & 0x7) << 4;
 			}
 
 			/*
 			 * ventilator dle teploty
-			 * (x - in_min) * (out_max - out_min) / (50 - 20) + out_min;
 			 */
-			if (rawTemperature <= 25) {
-				set_fan(0);
-			} else {
-				set_fan(map_minmax(rawTemperature,25,50,120,255));
+			if (rawTemperature != THERM_TEMP_ERR) {
+				if (rawTemperature < 25) {
+					set_fan(0);
+				} else {
+					set_fan(map_minmax(rawTemperature, 25, 50, 120, 255));
+				}
 			}
+			/*
+			 * start dalsiho mereni
+			 */
+			therm_reset();
+			therm_write_byte(THERM_CMD_SKIPROM);
+			therm_write_byte(THERM_CMD_CONVERTTEMP);
+			tempTicks = millis();
+
+
+
 		}
 
 		/*
@@ -764,22 +835,28 @@ int main(void) {
 		milis_time = millis();
 
 		switch (pwm_status) {
+		case EFFECT:
+			switch (effect) {
+			case FLASH:
+				led_flash();
+				break;
+			case STORM:
+				led_storm();
+				break;
+			}
+			effect = NO_EFFECT;
 		case MASTER:
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
-				for (uint8_t i = 0; i < 7; i++) {
+				for (uint8_t i = 0; i < 8; i++) {
 					xcrc = crc16_update(xcrc, LOW_BYTE(p_incLedValues[i]));
 					xcrc = crc16_update(xcrc, HIGH_BYTE(p_incLedValues[i]));
 				}
 
-				xcrc = crc16_update(xcrc, LOW_BYTE(crc));
-				xcrc = crc16_update(xcrc, HIGH_BYTE(crc));
-
 				if (xcrc == 0)  {
-						uint16_t *tmpptr = p_ledValues;
-						memcpy((uint8_t*) p_prevLedValues,
-								(uint8_t*) p_ledValues, LEDS * 2);
-						p_ledValues = p_incLedValues;
-						p_incLedValues = tmpptr;
+					uint16_t *tmpptr = p_prevLedValues;
+					p_prevLedValues = p_ledValues;
+					p_ledValues = p_incLedValues;
+					p_incLedValues = tmpptr;
 					//priznak startu interpolace
 					newValIsOK = 1;
 				}
@@ -791,14 +868,12 @@ int main(void) {
 			//demo provoz
 			//postupne  zapina kazdou led na hodnotu 0 .. 250 .. 0
 			for (uint8_t i = 0; i < LEDS; i++) {
-				set_fan(0);
 				for (uint8_t v = 0; v < 170; v++) {
 					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
 					_delay_ms(2);
 					pwm_update();
 					wdt_reset();
 				}
-				set_fan(255);
 				for (uint8_t v = 169; v > 0; v--) {
 					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
 					_delay_ms(2);
@@ -807,6 +882,15 @@ int main(void) {
 				}
 				actLedValues[i] = 0;
 			}
+
+			//flash
+			led_flash();
+			_delay_ms(100);
+			led_flash();
+			_delay_ms(80);
+			led_flash();
+			//TODO: storm
+			led_storm();
 			break;
 /*
 		default:
@@ -869,13 +953,13 @@ int main(void) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < LEDS; x++) {
-					actLedValues[x] = map(interpolateTime, 0, ISTEPS,
+					actLedValues[x] = map(isteps, 0, ISTEPS,
 							p_prevLedValues[x], p_ledValues[x]);
 				}
-				interpolateTime++;
-				if (interpolateTime > ISTEPS) {
+				isteps++;
+				if (isteps > ISTEPS) {
 					newValIsOK = 0;
-					interpolateTime = 0;
+					isteps = 0;
 				}
 				pwm_update();
 			}
