@@ -32,9 +32,11 @@
 
 //TODO:  if overheat lower brightness
 
-//#define DEBUG
-
-#define VERSION       0x01
+//VERSION = cislo hlavni verze
+#define VERSION          100
+// 100  tiny 2313
+// 200  tiny 4313
+#define VERSION_SUB      201
 
 #define F_CPU         16000000L
 // includes
@@ -144,7 +146,7 @@ unsigned long i_timeTicks = 0;
 #endif
 
 const uint8_t version PROGMEM = VERSION;
-
+const uint8_t version_sub PROGMEM = VERSION_SUB;
 
 const uint8_t pwmtable1[170] PROGMEM = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2,
 		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -490,14 +492,6 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	case reg_LED_L_0 ... reg_LED_H_6:
 		ret = (*((uint8_t *) (p_actLedValues) + reg));
 		break;
-/*
-	case reg_CRC_H:
-		ret = HIGH_BYTE(crc);
-		break;
-	case reg_CRC_L:
-		ret = LOW_BYTE(crc);
-		break;
-*/
 	case reg_MASTER:
 		ret = pwm_status;
 		break;
@@ -507,8 +501,11 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	case reg_RAW_THERM:
 		ret = rawTemperature;
 		break;
-	case reg_VERSION:
-		ret = pgm_read_byte(version);
+	case reg_VERSION_MAIN:
+		ret = pgm_read_byte(&version);
+		break;
+	case reg_VERSION_SUB:
+		ret = pgm_read_byte(&version_sub);
 		break;
 	}
 	return ret;
