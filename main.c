@@ -188,9 +188,6 @@ int16_t val, nval = 0;
 #define MAXPWM        256 //63
 #define PWM_BITS   12
 #define LEDS       7
-#define LOOP_COUNT 9
-
-#define MAX_LOOP   LOOP_COUNT-1
 
 #define NIGHT_LED1  0
 #define NIGHT_LED2  8
@@ -223,8 +220,11 @@ volatile uint8_t bitmask = 0;
  *  			a pouze u vyssich bitu
  *  	-  TODO: overit dobu trvani preruseni pri I2C komunikaci
  */
-const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
+
 #if (PWM_FREQ == 480)
+#define LOOP_COUNT 9
+#define MAX_LOOP   LOOP_COUNT-1
+const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
 const uint16_t tbl_loop_len[LOOP_COUNT] = {3069,5117,6141,10237,14333,22525,26621,30717,32765};
 #define WAIT_0 8
 #define WAIT_1 16
@@ -238,6 +238,9 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = {3069,5117,6141,10237,14333,22525,2662
 #define WAIT_7b 505
 #define WAIT_7c 249
 #else
+#define LOOP_COUNT 9
+#define MAX_LOOP   LOOP_COUNT-1
+const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
 const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45045, 53237, 61429, 65523 };
 #define WAIT_0   16
 #define WAIT_1   32
