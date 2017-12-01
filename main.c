@@ -31,7 +31,6 @@
  */
 
 //TODO:  if overheat lower brightness
-
 //VERSION = cislo hlavni verze
 #define VERSION          100
 // 100  tiny 2313
@@ -53,7 +52,6 @@
 #include "usiTwiSlave.h"
 
 #include "twi_registry.h"
-
 
 #ifdef DEBUG
 #include "dbg_putchar.h"
@@ -88,6 +86,12 @@ uint8_t twiaddr = TWIADDR;
 #define THERM_PIN 	PINB
 #define THERM_DQ 	PB4
 #define TEMPERATURE_DELAY    2000
+#define TEMPERATURE_TRESHOLD 28       //fan on
+#define TEMPERATURE_TRESHOLD_STOP 40  //fan off, when led is off
+#define TEMPERATURE_MAX      40  //fan max
+#define FAN_MIN              80  //minimum pwm fan 30%
+#define FAN_MAX              255 //minimum pwm fan 30%
+
 /* Utils */
 #define THERM_INPUT_MODE() 		THERM_DDR&=~(1<<THERM_DQ)
 #define THERM_OUTPUT_MODE()		THERM_DDR|=(1<<THERM_DQ)
@@ -176,7 +180,7 @@ uint16_t crc = 0xFFFF;
 
 // pwm
 int16_t val, nval = 0;
-
+#define PWM_FREQ      240   //480
 #define LED_PORT      PORTD              // Port for PWM
 #define LED_DIR       DDRD               // Register for PWM
 #define PWM_CHANNELS  7                  // count PWM channels
@@ -184,8 +188,9 @@ int16_t val, nval = 0;
 #define MAXPWM        256 //63
 #define PWM_BITS   12
 #define LEDS       7
-#define MAX_LOOP   7
-#define LOOP_COUNT 8
+#define LOOP_COUNT 9
+
+#define MAX_LOOP   LOOP_COUNT-1
 
 #define NIGHT_LED1  0
 #define NIGHT_LED2  8
@@ -194,7 +199,9 @@ volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
 
 /* poradi a casovani bitu:
- * 1 tick = 1/FCPU * 16 * 1000000 uS =  0,96uS
+ *  - mame 10x preruseni na 4096 bitu
+ *  - cely cyklus trva neco pres  4 mSec, takze mame frekvenci cca 240Hz
+ * 1 tick = 1/FCPU * 16 * 1000000 uS =  1uS
  * 0, 1, 2, 3, 4, 5, 1/4 7,1/2 6,1/2 7,1/2 6,1/4 7, 1/2 8,1/2 9,1/2 8,1/4 11,1/2 10,1/2 11, 1/2 10,1/4 11,1/2 9
  *  0 bit: 1 uS
  *  1 bit: 2 uS
@@ -206,23 +213,48 @@ volatile uint8_t bitmask = 0;
  *  1/4 7 bitu 32uS
  *  atd ....
  *  nejdelsi okno mezi prerusenimi je cca 1000 uS (1/2 11 bitu
- *  ostatni okna jsou po 128, 256, 512 uS
+ *  ostatni okna jsou cca 100, 200, 500 uS
  *
  *  pro reset teplomeru potrebujeme okno o delce cca 520uS
- *  takze cekame na setovani OCR1B na 45045, pak mame cca 1000uS
+ *  takze cekame na nastaveni OCR1B na 45045, pak mame cca 1000uS na reset teplomeru
  *
  *  vyznamnou chybu muzou zpusobit dalsi preruseni
  *  	-  funkce milis(), ktera trva ...4,5 uS, takze by neme byt problem = max chyba je cca 3.5%
  *  			a pouze u vyssich bitu
- *  	-  TODO: overit preruseni pri I2C komunikaci
+ *  	-  TODO: overit dobu trvani preruseni pri I2C komunikaci
  */
-const uint8_t  tbl_loop_bitmask[LOOP_COUNT] = {8,9,8,11,10,11,10,11,9};
-const uint16_t  tbl_loop_len[LOOP_COUNT] =   {	6133,10229,12277,20469,28661,45045,53237,61429,65523 };
+const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
+#if (PWM_FREQ == 480)
+const uint16_t tbl_loop_len[LOOP_COUNT] = {3069,5117,6141,10237,14333,22525,26621,30717,32765};
+#define WAIT_0 8
+#define WAIT_1 16
+#define WAIT_2 25
+#define WAIT_3 57
+#define WAIT_4 121
+#define WAIT_5 249
+#define WAIT_6a 249
+#define WAIT_6b 249
+#define WAIT_7a 249
+#define WAIT_7b 505
+#define WAIT_7c 249
+#else
+const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45045, 53237, 61429, 65523 };
+#define WAIT_0   16
+#define WAIT_1   32
+#define WAIT_2   57
+#define WAIT_3   121
+#define WAIT_4   249
+#define WAIT_5   505
+#define WAIT_6a  505
+#define WAIT_6b  505
+#define WAIT_7a  505
+#define WAIT_7b  1017
+#define WAIT_7c  505
+#endif
 
-
-uint16_t incLedValues[LEDS+1] = {0 };
-uint16_t ledValues[LEDS+1] = { 0 };
-uint16_t prevLedValues[LEDS+1] = { 0 };
+uint16_t incLedValues[LEDS + 1] = { 0 };
+uint16_t ledValues[LEDS + 1] = { 0 };
+uint16_t prevLedValues[LEDS + 1] = { 0 };
 uint16_t actLedValues[LEDS] = { 0 };
 
 uint16_t *p_ledValues = ledValues;
@@ -256,77 +288,75 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 }
 
 //linear interpolation
-static long map(long x, long in_min, long in_max, long out_min,
-		long out_max) {
-    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+static long map(long x, long in_min, long in_max, long out_min, long out_max) {
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 /*
  * PWM / bit angle modulation
  */
 // Timer1 handler.
-
 ISR(TIMER1_COMPB_vect) {
 	uint8_t r1, r2, r3;
 	bitmask = tbl_loop_bitmask[loop];
 
 	if (loop == 0) {
-			r1 = _d[0];
-			r2 = _d[1];
-			r3 = _d[2];
+		r1 = _d[0];
+		r2 = _d[1];
+		r3 = _d[2];
 
-			__builtin_avr_delay_cycles(4L); //vyrovnani posledniho bitu
+		__builtin_avr_delay_cycles(4L); //vyrovnani posledniho bitu
 
-			//bit 0
-			LED_PORT = r1; //45 cyklu
-			__builtin_avr_delay_cycles(16L);
+		//bit 0
+		LED_PORT = r1; //45 cyklu
+		__builtin_avr_delay_cycles(WAIT_0);
 
-			//bit 1
-			LED_PORT = r2;
-			__builtin_avr_delay_cycles(32L);
+		//bit 1
+		LED_PORT = r2;
+		__builtin_avr_delay_cycles(WAIT_1);
 
-			//bit 2
-			LED_PORT = r3;
-			__builtin_avr_delay_cycles(64L - 7L); //7 taktu na zpracovani
+		//bit 2
+		LED_PORT = r3;
+		__builtin_avr_delay_cycles(WAIT_2); //7 taktu na zpracovani
 
-			//bit 3
-			LED_PORT = _d[3];
-			__builtin_avr_delay_cycles(128L - 7L);
+		//bit 3
+		LED_PORT = _d[3];
+		__builtin_avr_delay_cycles(WAIT_3);
 
-			//bit 4
-			LED_PORT = _d[4];
-			__builtin_avr_delay_cycles(256L - 7L);
+		//bit 4
+		LED_PORT = _d[4];
+		__builtin_avr_delay_cycles(WAIT_4);
 
-			//bit 5
-			LED_PORT = _d[5];
-			__builtin_avr_delay_cycles(512L - 7L);
+		//bit 5
+		LED_PORT = _d[5];
+		__builtin_avr_delay_cycles(WAIT_5);
 
-			//bit 7a
-			LED_PORT = _d[7];
-			__builtin_avr_delay_cycles(512L - 7L);
+		//bit 7a
+		LED_PORT = _d[7];
+		__builtin_avr_delay_cycles(WAIT_7a);
 
-			//bit 6a
-			LED_PORT = _d[6];
-			__builtin_avr_delay_cycles(512L - 7L );
+		//bit 6a
+		LED_PORT = _d[6];
+		__builtin_avr_delay_cycles(WAIT_6a);
 
-			//bit 7b
-			LED_PORT = _d[7];
-			__builtin_avr_delay_cycles(1024L - 7L);
+		//bit 7b
+		LED_PORT = _d[7];
+		__builtin_avr_delay_cycles(WAIT_7b);
 
-			//bit 6b
-			LED_PORT = _d[6];
-			__builtin_avr_delay_cycles(512L - 7L);
+		//bit 6b
+		LED_PORT = _d[6];
+		__builtin_avr_delay_cycles(WAIT_6b);
 
-			//bit 7c
-			LED_PORT = _d[7];
-			__builtin_avr_delay_cycles(512L - 7L);
+		//bit 7c
+		LED_PORT = _d[7];
+		__builtin_avr_delay_cycles(WAIT_7c);
 
-			//bit 8a
-			LED_PORT = _d[8];
-			OCR1B = tbl_loop_len[loop];
-		} else {
-			LED_PORT = _d[bitmask];
-			OCR1B = tbl_loop_len[loop];
-		}
+		//bit 8a
+		LED_PORT = _d[8];
+		OCR1B = tbl_loop_len[loop];
+	} else {
+		LED_PORT = _d[bitmask];
+		OCR1B = tbl_loop_len[loop];
+	}
 
 	//loop++;
 	if (++loop > MAX_LOOP) {
@@ -345,7 +375,6 @@ ISR(TIMER1_COMPB_vect) {
 	}
 
 }
-
 
 static void _pwm_init(void) {
 	// Hardware init.
@@ -408,16 +437,18 @@ static uint8_t therm_reset() {
 	uint8_t i;
 	//Pull line low and wait for 480uS
 	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
-		//cekani na casove okno
-		// 480us = cca 7680 cyklu, ktere by mely byt k dispozici
-	while (OCR1B < 45045){;};
+	//cekani na casove okno
+	// 480us = cca 7680 cyklu, ktere by mely byt k dispozici
+	while (OCR1B < 45045) {
+		;
+	};
 	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
-		THERM_LOW();
-		THERM_OUTPUT_MODE();
-		_delay_us(480);
-		THERM_INPUT_MODE();
-		_delay_us(40);
-		i = (THERM_PIN & (1 << THERM_DQ));
+	THERM_LOW();
+	THERM_OUTPUT_MODE();
+	_delay_us(480);
+	THERM_INPUT_MODE();
+	_delay_us(40);
+	i = (THERM_PIN & (1 << THERM_DQ));
 	//}
 	_delay_us(480);
 	//Return the value read from the presence pulse (0=OK, 1=WRONG)
@@ -425,35 +456,39 @@ static uint8_t therm_reset() {
 }
 
 static void therm_write_bit(uint8_t bit) {
-		//Pull line low for 1uS
-		while (OCR1B < 6133){;};
-		THERM_LOW();
-		THERM_OUTPUT_MODE();
-		_delay_us(1);
-		//If we want to write 1, release the line (if not will keep low)
-		if (bit)
-			THERM_INPUT_MODE();
-		//Wait for 60uS and release the line
-		_delay_us(60);
+	//Pull line low for 1uS
+	while (OCR1B < 6133) {
+		;
+	};
+	THERM_LOW();
+	THERM_OUTPUT_MODE();
+	_delay_us(1);
+	//If we want to write 1, release the line (if not will keep low)
+	if (bit)
 		THERM_INPUT_MODE();
+	//Wait for 60uS and release the line
+	_delay_us(60);
+	THERM_INPUT_MODE();
 }
 
 static uint8_t therm_read_bit(void) {
 
 	uint8_t bit = 0;
-		//Pull line low for 1uS
-	    while (OCR1B < 6133){;};
-		THERM_LOW();
-		THERM_OUTPUT_MODE();
-		_delay_us(1);
-		//Release line and wait for 14uS
-		THERM_INPUT_MODE();
-		_delay_us(10);
-		//Read line value
-		if (THERM_PIN & (1 << THERM_DQ))
-			bit = 1;
-		//Wait for 45uS to end and return read value
-		_delay_us(45);
+	//Pull line low for 1uS
+	while (OCR1B < 6133) {
+		;
+	};
+	THERM_LOW();
+	THERM_OUTPUT_MODE();
+	_delay_us(1);
+	//Release line and wait for 14uS
+	THERM_INPUT_MODE();
+	_delay_us(10);
+	//Read line value
+	if (THERM_PIN & (1 << THERM_DQ))
+		bit = 1;
+	//Wait for 45uS to end and return read value
+	_delay_us(45);
 	return bit;
 }
 
@@ -468,12 +503,12 @@ static uint8_t therm_read_byte(void) {
 
 static void therm_write_byte(uint8_t byte) {
 
-    uint8_t i=8;
-    while(i--){
-            //Write actual bit and shift one position right to make the next bit ready
-            therm_write_bit(byte&1);
-            byte>>=1;
-    }
+	uint8_t i = 8;
+	while (i--) {
+		//Write actual bit and shift one position right to make the next bit ready
+		therm_write_bit(byte & 1);
+		byte >>= 1;
+	}
 }
 
 /*
@@ -486,14 +521,14 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	case reg_MASTER:
 		pwm_status = value;
 		break;
-/*
-	case reg_CRC_H:
-		BYTEHIGH(crc) = value;
-		break;
-	case reg_CRC_L:
-		BYTELOW(crc) = value;
-		break;
-*/
+		/*
+		 case reg_CRC_H:
+		 BYTEHIGH(crc) = value;
+		 break;
+		 case reg_CRC_L:
+		 BYTELOW(crc) = value;
+		 break;
+		 */
 	case reg_LED_L_0 ... reg_CRC_H:
 		(*((uint8_t *) (p_incLedValues) + reg)) = value;
 		break;
@@ -626,6 +661,16 @@ void led_storm() {
 	return;
 }
 
+uint8_t checkActLedVal() {
+	uint8_t lv = 0;
+	for (uint8_t i = 0; i < LEDS; i++) {
+		if (actLedValues[i] != 0) {
+			lv = 1;
+			break;
+		}
+	}
+	return lv;
+}
 
 /**************************************
  * Main routine
@@ -710,8 +755,8 @@ int main(void) {
 	 *
 	 */
 	set_fan(255);
-    _delay_ms(2000);
-
+	_delay_ms(2000);
+	set_fan(0);
 	/*
 	 * Inicializace teplomeru
 	 * start koverze
@@ -719,11 +764,9 @@ int main(void) {
 
 	if (therm_reset()) {
 		therm_ok = 0;
-		set_fan(255);
+		set_fan(FAN_MAX);
 	} else {
 		therm_ok = 1;
-		set_fan(0);
-
 		therm_reset();
 		therm_write_byte(THERM_CMD_SKIPROM);
 		therm_write_byte(THERM_CMD_WSCRATCHPAD);
@@ -734,7 +777,8 @@ int main(void) {
 		therm_reset();
 		therm_write_byte(THERM_CMD_SKIPROM);
 		therm_write_byte(THERM_CMD_CONVERTTEMP);
-		while(!therm_read_bit());
+		while (!therm_read_bit())
+			;
 	}
 
 	/*
@@ -793,7 +837,7 @@ int main(void) {
 		pwm_status = DEMO;
 	} else {
 		//cekej na master status
-		while ((pwm_status != 0xFF) || (pwm_status != 0xDE)) {
+		while ((pwm_status != MASTER) || (pwm_status != DEMO)) {
 			wdt_reset();
 			_delay_ms(1000);
 			if (++wait_tmp > MASTER_TIMEOUT)
@@ -822,13 +866,25 @@ int main(void) {
 			}
 
 			/*
-			 * ventilator dle teploty
+			 * ventilator dle teploty, pokud je ledval > 0
 			 */
-			if (rawTemperature != THERM_TEMP_ERR) {
-				if (rawTemperature < 25) {
-					set_fan(0);
-				} else {
-					set_fan(map_minmax(rawTemperature, 25, 50, 120, 255));
+
+			if ((checkActLedVal() == 0)
+					&& (rawTemperature < TEMPERATURE_TRESHOLD_STOP)) {
+				set_fan(0);
+			} else {
+				if (rawTemperature != THERM_TEMP_ERR) {
+					if (rawTemperature < TEMPERATURE_TRESHOLD) {
+						set_fan(0);
+					} else {
+						uint8_t fanVal = map_minmax(rawTemperature,
+								TEMPERATURE_TRESHOLD, TEMPERATURE_MAX, FAN_MIN,
+								FAN_MAX);
+						if (fanVal < 150)
+							set_fan(FAN_MAX);
+						_delay_ms(500);
+						set_fan(fanVal);
+					}
 				}
 			}
 			/*
@@ -838,9 +894,13 @@ int main(void) {
 			therm_write_byte(THERM_CMD_SKIPROM);
 			therm_write_byte(THERM_CMD_CONVERTTEMP);
 			tempTicks = millis();
-
-
-
+		} else {
+			//teplomer nefunguje, ale chladit potrebujeme
+			if (checkActLedVal() == 0) {
+				set_fan(0);
+			} else {
+				set_fan(FAN_MAX);
+			}
 		}
 
 		/*
@@ -869,7 +929,7 @@ int main(void) {
 					xcrc = crc16_update(xcrc, HIGH_BYTE(p_incLedValues[i]));
 				}
 
-				if (xcrc == 0)  {
+				if (xcrc == 0) {
 					uint16_t *tmpptr = p_prevLedValues;
 					p_prevLedValues = p_ledValues;
 					p_ledValues = p_incLedValues;
@@ -909,58 +969,6 @@ int main(void) {
 			//TODO: storm
 			led_storm();
 			break;
-/*
-		default:
-			//pokud je sepnuty spinac a neprijde master prikaz,
-			//pak bezi autonomni provoz, dle nastavenych prepinacu adresy pocita delku dne od zapnuti
-			//TODO: fan off v noci
-			//TODO: opravit nval
-			if ((milis_time - timeTicks) >= SEC) {
-				timeTicks = milis_time;
-
-				dayTime++;
-				if (dayTime > DAY)
-					dayTime = 0;
-
-				if (dayTime <= RAMPUP) {
-					//ramp up
-					val = map(dayTime, 0, RAMPUP, 0, MAXPWM);
-				} else if ((dayTime >= (setDayTime - RAMPDOWN))
-						&& (dayTime <= setDayTime)) {
-					//rampDown
-					val = map(dayTime, setDayTime, setDayTime - RAMPDOWN,
-					MAXPWM, 0);
-				} else if ((dayTime > setDayTime)
-						&& (dayTime <= (setDayTime + setNightTime))
-						&& (setNightTime > 0)) {
-					//night ramp down
-					val = map(dayTime, setDayTime, setDayTime + setNightTime,
-					PWMNIGHT, 0);
-				} else if ((dayTime > RAMPUP)
-						&& (dayTime < setDayTime - RAMPDOWN)) {
-					//day
-					val = MAXPWM;
-				} else {
-					//night
-					val = 0;
-				}
-				if (val < 170) {
-					tmp = pgm_read_byte(&pwmtable1[val]);
-				} else if (val < 256) {
-					tmp = pgm_read_word(&pwmtable2[val - 170]);
-				} else {
-					tmp = 0;
-				}
-
-				for (uint8_t x = 0; x < LEDS; x++) {
-					actLedValues[x] = tmp;
-				}
-
-				pwm_update();
-
-			}
-			break;
-*/
 		}
 
 		// interpolace hodnot
@@ -970,8 +978,8 @@ int main(void) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < LEDS; x++) {
-					actLedValues[x] = map(isteps, 0, ISTEPS,
-							p_prevLedValues[x], p_ledValues[x]);
+					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
+							p_ledValues[x]);
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
