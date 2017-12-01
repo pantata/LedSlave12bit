@@ -36,7 +36,7 @@
 #define VERSION          100
 // 100  tiny 2313
 // 200  tiny 4313
-#define VERSION_SUB      201
+#define VERSION_SUB      205 // uprava na cca 240 hz
 
 #define F_CPU         16000000L
 // includes
@@ -193,10 +193,32 @@ int16_t val, nval = 0;
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
 
-const uint8_t  tbl_loop_bitmask[LOOP_COUNT] =
-		{ 8, 9, 11, 10, 11, 11, 10, 11 };
-const uint16_t  tbl_loop_len[LOOP_COUNT] = { 2044, 4092, 6140, 8188, 10236,
-		12284, 14332, 16380 };
+/* poradi a casovani bitu:
+ * 1 tick = 1/FCPU * 16 * 1000000 uS =  0,96uS
+ * 0, 1, 2, 3, 4, 5, 1/4 7,1/2 6,1/2 7,1/2 6,1/4 7, 1/2 8,1/2 9,1/2 8,1/4 11,1/2 10,1/2 11, 1/2 10,1/4 11,1/2 9
+ *  0 bit: 1 uS
+ *  1 bit: 2 uS
+ *  2 bit: 4 uS
+ *  3 bit: 8 uS
+ *  4 bit: 16 uS
+ *  5 bit: 32 uS
+ *  1/2 6bitu: 32us (6 bit: 64uS)
+ *  1/4 7 bitu 32uS
+ *  atd ....
+ *  nejdelsi okno mezi prerusenimi je cca 1000 uS (1/2 11 bitu
+ *  ostatni okna jsou po 128, 256, 512 uS
+ *
+ *  pro reset teplomeru potrebujeme okno o delce cca 520uS
+ *  takze cekame na setovani OCR1B na 45045, pak mame cca 1000uS
+ *
+ *  vyznamnou chybu muzou zpusobit dalsi preruseni
+ *  	-  funkce milis(), ktera trva ...4,5 uS, takze by neme byt problem = max chyba je cca 3.5%
+ *  			a pouze u vyssich bitu
+ *  	-  TODO: overit preruseni pri I2C komunikaci
+ */
+const uint8_t  tbl_loop_bitmask[LOOP_COUNT] = {8,9,8,11,10,11,10,11,9};
+const uint16_t  tbl_loop_len[LOOP_COUNT] =   {	6133,10229,12277,20469,28661,45045,53237,61429,65523 };
+
 
 uint16_t incLedValues[LEDS+1] = {0 };
 uint16_t ledValues[LEDS+1] = { 0 };
@@ -246,67 +268,65 @@ static long map(long x, long in_min, long in_max, long out_min,
 ISR(TIMER1_COMPB_vect) {
 	uint8_t r1, r2, r3;
 	bitmask = tbl_loop_bitmask[loop];
-	switch (loop) {
-	case 0:
-		r1 = _d[0];
-		r2 = _d[1];
-		r3 = _d[2];
 
-		__builtin_avr_delay_cycles(4L); //vyrovnani
+	if (loop == 0) {
+			r1 = _d[0];
+			r2 = _d[1];
+			r3 = _d[2];
 
-		//bit 0
-		LED_PORT = r1;
-		__builtin_avr_delay_cycles(3L);
+			__builtin_avr_delay_cycles(4L); //vyrovnani posledniho bitu
 
-		//bit 1
-		LED_PORT = r2;
-		__builtin_avr_delay_cycles(7L);
+			//bit 0
+			LED_PORT = r1; //45 cyklu
+			__builtin_avr_delay_cycles(16L);
 
-		//bit 2
-		LED_PORT = r3;
-		__builtin_avr_delay_cycles(9L); //6 ticks na zpracovani
+			//bit 1
+			LED_PORT = r2;
+			__builtin_avr_delay_cycles(32L);
 
-		//bit 3
-		LED_PORT = _d[3];
-		__builtin_avr_delay_cycles(25L);
+			//bit 2
+			LED_PORT = r3;
+			__builtin_avr_delay_cycles(64L - 7L); //7 taktu na zpracovani
 
-		//bit 4
-		LED_PORT = _d[4];
-		__builtin_avr_delay_cycles(57L);
+			//bit 3
+			LED_PORT = _d[3];
+			__builtin_avr_delay_cycles(128L - 7L);
 
-		//bit 5
-		LED_PORT = _d[5];
-		__builtin_avr_delay_cycles(121L);
+			//bit 4
+			LED_PORT = _d[4];
+			__builtin_avr_delay_cycles(256L - 7L);
 
-		//bit 7a
-		LED_PORT = _d[7];
-		__builtin_avr_delay_cycles(121L);
+			//bit 5
+			LED_PORT = _d[5];
+			__builtin_avr_delay_cycles(512L - 7L);
 
-		//bit 6a
-		LED_PORT = _d[6];
-		__builtin_avr_delay_cycles(121L);
+			//bit 7a
+			LED_PORT = _d[7];
+			__builtin_avr_delay_cycles(512L - 7L);
 
-		//bit 7b, 7c
-		LED_PORT = _d[7];
-		__builtin_avr_delay_cycles(249L);
+			//bit 6a
+			LED_PORT = _d[6];
+			__builtin_avr_delay_cycles(512L - 7L );
 
-		//bit 6b
-		LED_PORT = _d[6];
-		__builtin_avr_delay_cycles(121L);
+			//bit 7b
+			LED_PORT = _d[7];
+			__builtin_avr_delay_cycles(1024L - 7L);
 
-		//bit 7d
-		LED_PORT = _d[7];
-		__builtin_avr_delay_cycles(121L);
+			//bit 6b
+			LED_PORT = _d[6];
+			__builtin_avr_delay_cycles(512L - 7L);
 
-		//bit 8
-		LED_PORT = _d[8];
-		OCR1B = tbl_loop_len[loop];
-		break;
-	case 1 ... 7:
-		LED_PORT = _d[bitmask];
-		OCR1B = tbl_loop_len[loop];
-		break;
-	}
+			//bit 7c
+			LED_PORT = _d[7];
+			__builtin_avr_delay_cycles(512L - 7L);
+
+			//bit 8a
+			LED_PORT = _d[8];
+			OCR1B = tbl_loop_len[loop];
+		} else {
+			LED_PORT = _d[bitmask];
+			OCR1B = tbl_loop_len[loop];
+		}
 
 	//loop++;
 	if (++loop > MAX_LOOP) {
@@ -390,7 +410,7 @@ static uint8_t therm_reset() {
 	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		//cekani na casove okno
 		// 480us = cca 7680 cyklu, ktere by mely byt k dispozici
-	while (OCR1B < 12000){;};
+	while (OCR1B < 45045){;};
 	//ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
@@ -406,7 +426,7 @@ static uint8_t therm_reset() {
 
 static void therm_write_bit(uint8_t bit) {
 		//Pull line low for 1uS
-		while (OCR1B < 5000){;};
+		while (OCR1B < 6133){;};
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
 		_delay_us(1);
@@ -422,7 +442,7 @@ static uint8_t therm_read_bit(void) {
 
 	uint8_t bit = 0;
 		//Pull line low for 1uS
-	    while (OCR1B < 5000){;};
+	    while (OCR1B < 6133){;};
 		THERM_LOW();
 		THERM_OUTPUT_MODE();
 		_delay_us(1);
