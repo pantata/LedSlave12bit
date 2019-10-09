@@ -33,9 +33,7 @@
 //TODO:  if overheat lower brightness
 //VERSION = cislo hlavni verze
 #define VERSION          200
-// 100  tiny 2313
-// 200  tiny 4313
-#define VERSION_SUB      205 // uprava na cca 240 hz
+#define VERSION_SUB      206
 
 #define F_CPU         16000000L
 // includes
@@ -171,6 +169,7 @@ const uint16_t pwmtable2[86] PROGMEM = { 259, 267, 276, 285, 295, 304, 314, 325,
 		1878, 1940, 2004, 2070, 2138, 2209, 2282, 2357, 2435, 2515, 2598, 2684,
 		2773, 2864, 2959, 3057, 3158, 3262, 3370, 3481, 3596, 3715, 3837, 3964,
 		4000 };
+	
 
 //teplomer
 int8_t therm_ok = 0;
@@ -658,6 +657,7 @@ void led_flash() {
 	actLedValues[1] = l1;
 	actLedValues[2] = l2;
 	pwm_update();
+	return;
 }
 
 void led_storm() {
@@ -762,7 +762,7 @@ int main(void) {
 	set_fan(0);
 	/*
 	 * Inicializace teplomeru
-	 * start koverze
+	 * start konverze
 	 */
 
 	if (therm_reset()) {
@@ -943,7 +943,7 @@ int main(void) {
 				inc_pwm_data = 1;
 			}
 
-			break;
+			break;		
 		case DEMO:
 			//demo provoz
 			//postupne  zapina kazdou led na hodnotu 0 .. 250 .. 0
