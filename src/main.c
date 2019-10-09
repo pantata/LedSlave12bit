@@ -32,7 +32,7 @@
 
 //TODO:  if overheat lower brightness
 //VERSION = cislo hlavni verze
-#define VERSION          100
+#define VERSION          200
 // 100  tiny 2313
 // 200  tiny 4313
 #define VERSION_SUB      205 // uprava na cca 240 hz
