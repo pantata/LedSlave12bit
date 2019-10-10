@@ -1,0 +1,5 @@
+Firmware for 7-channel led driver.
+
+ Chip Attiny4313, 4000 brightness levels, control via i2c bus. smooth transitions.
+
+ Designed for reef lighting.

@@ -31,6 +31,7 @@
  */
 
 //TODO:  if overheat lower brightness
+
 //VERSION = cislo hlavni verze
 #define VERSION          200
 #define VERSION_SUB      206
@@ -150,6 +151,7 @@ unsigned long i_timeTicks = 0;
 const uint8_t version PROGMEM = VERSION;
 const uint8_t version_sub PROGMEM = VERSION_SUB;
 
+
 const uint8_t pwmtable1[170] PROGMEM = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2,
 		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 		3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7,
@@ -170,6 +172,7 @@ const uint16_t pwmtable2[86] PROGMEM = { 259, 267, 276, 285, 295, 304, 314, 325,
 		2773, 2864, 2959, 3057, 3158, 3262, 3370, 3481, 3596, 3715, 3837, 3964,
 		4000 };
 	
+
 
 //teplomer
 int8_t therm_ok = 0;
@@ -838,6 +841,7 @@ int main(void) {
 	if (!(PINB & (1 << PB6))) {
 		//sepnuto, demo
 		pwm_status = DEMO;
+		;
 	} else {
 		//cekej na master status
 		while ((pwm_status != MASTER) || (pwm_status != DEMO)) {
@@ -944,6 +948,7 @@ int main(void) {
 			}
 
 			break;		
+#ifdef DEMO_ENABLE
 		case DEMO:
 			//demo provoz
 			//postupne  zapina kazdou led na hodnotu 0 .. 250 .. 0
@@ -972,6 +977,7 @@ int main(void) {
 			//TODO: storm
 			led_storm();
 			break;
+#endif			
 		}
 
 		// interpolace hodnot
