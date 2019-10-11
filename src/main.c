@@ -5,36 +5,20 @@
  *      Author: LSL<ludek.slouf@gmail.com>
  *
  *      Porty:
- *
  *      B0, B1, B3 : IN -slave adresa
  *      B2 : OUT ventilator
  *      B4 : IN-OUT termistor
  *      B5, B7: SDA, SCL - i2c slave
+ * 		B6 : Pocatecni TWI adresa
  *      D0 - D6: OUT pwm
- *
- *      TODO: provoz bez kontroleru:
- *      po zapnuti napajeni stoupa jas po dobu jedne hodiny do maxima
- *      - nastaveneho propojkou
- *      - delka sviceni je  urcena propojkou (10,11,12 hodin)
- *      - po uplynuti doby klesa jas na nulu po dobu jedne hodiny
- *      - dalsi hodinu funguje nocni sviceni
- *      - externi spinaci hodiny je potreba nastavit tak, aby se vyply
- *      - po ukonceni celeho cyklu
- *
- *      - popojky A0 A1 A2
- *        --0 12 hod
- *        --1 10 hod max
- *        00- 100%
- *        01- 75%
- *        10- 50%
- *        11- 25%
+ * 
  */
 
 //TODO:  if overheat lower brightness
 
 //VERSION = cislo hlavni verze
 #define VERSION          200
-#define VERSION_SUB      206
+#define VERSION_SUB      207
 
 #define F_CPU         16000000L
 // includes
@@ -66,20 +50,16 @@
 #define BYTELOW(v)   (*(((unsigned char *) (&v))))
 #define BYTEHIGH(v)  (*((unsigned char *) (&v)+1))
 
-#define	bis(ADDRESS,BIT)	(ADDRESS & (1<<BIT))
-#define sbi(port,bit)       (port) |= (1 << (bit))
-#define cbi(port,bit)       (port) &= ~(1 << (bit))
-
-#define TWIADDR 0b00100000
-//#define TWIADDR 0b00110000
-uint8_t twiaddr = TWIADDR;
+#define TWIADDR1 0b00100000
+#define TWIADDR2 0b00110000
+uint8_t twiaddr = TWIADDR1;
 
 /* Thermometer */
 #define THERM_ERROR_ERR 0x00
 #define THERM_ERROR_OK  0x01
 #define THERM_TEMP_ERR  0x80
 
-/* Thermometer Connections (At your choice) */
+/* Thermometer Connections  */
 #define THERM_PORT 	PORTB
 #define THERM_DDR 	DDRB
 #define THERM_PIN 	PINB
@@ -122,35 +102,12 @@ uint8_t twiaddr = TWIADDR;
 
 // rizeni chodu
 unsigned long tempTicks = 0;
-unsigned long pwmTicks = 0;
-unsigned long dayTime = 0;
-unsigned long setDayTime = 0;
-unsigned long nightTime = 0;
-unsigned long setNightTime = 0;
 unsigned long timeTicks = 0;
 unsigned long milis_time = 0;
 unsigned long i_timeTicks = 0;
 
-#ifdef DEBUG
-#define SEC  1000L
-#else
-#define SEC  1000L
-#endif
-
-#define HOUR  3600L
-#define DAY  (24L*HOUR)
-
-#ifdef DEBUG
-#define RAMPUP  (256L)
-#define RAMPDOWN  (256L)
-#else
-#define RAMPUP  (4L*HOUR)
-#define RAMPDOWN  (4L*HOUR)
-#endif
-
 const uint8_t version PROGMEM = VERSION;
 const uint8_t version_sub PROGMEM = VERSION_SUB;
-
 
 const uint8_t pwmtable1[170] PROGMEM = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2,
 		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -172,8 +129,6 @@ const uint16_t pwmtable2[86] PROGMEM = { 259, 267, 276, 285, 295, 304, 314, 325,
 		2773, 2864, 2959, 3057, 3158, 3262, 3370, 3481, 3596, 3715, 3837, 3964,
 		4000 };
 	
-
-
 //teplomer
 int8_t therm_ok = 0;
 uint8_t scratchpad[9];
@@ -182,17 +137,11 @@ uint16_t crc = 0xFFFF;
 
 // pwm
 int16_t val, nval = 0;
-#define PWM_FREQ      240   //480
-#define LED_PORT      PORTD              // Port for PWM
-#define LED_DIR       DDRD               // Register for PWM
-#define PWM_CHANNELS  7                  // count PWM channels
-#define PWMNIGHT      19  //5% max hodnoty
-#define MAXPWM        256 //63
-#define PWM_BITS   12
-#define LEDS       7
-
-#define NIGHT_LED1  0
-#define NIGHT_LED2  8
+#define PWM_FREQ      240    //480
+#define LED_PORT      PORTD  // Port for PWM
+#define LED_DIR       DDRD   // Register for PWM
+#define PWM_BITS      12
+#define PWM_CHANNELS  7
 
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
@@ -257,10 +206,10 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #define WAIT_7c  505
 #endif
 
-uint16_t incLedValues[LEDS + 1] = { 0 };
-uint16_t ledValues[LEDS + 1] = { 0 };
-uint16_t prevLedValues[LEDS + 1] = { 0 };
-uint16_t actLedValues[LEDS] = { 0 };
+uint16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t actLedValues[PWM_CHANNELS] = { 0 };
 
 uint16_t *p_ledValues = ledValues;
 uint16_t *p_prevLedValues = prevLedValues;
@@ -281,8 +230,6 @@ volatile uint8_t inc_pwm_data = 1;
 volatile uint8_t effect = 0;
 
 int16_t tmp;
-int16_t tmp2;
-int delta;
 
 //interpolace s mezemi min a max, 8bit
 static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
@@ -395,7 +342,7 @@ void pwm_update(void) {
 	memset(_d_b, 0, 12);
 	//rearrange values to ports
 	for (int i = 0; i < PWM_BITS; i++) {
-		for (int j = 0; j < LEDS; j++) {
+		for (int j = 0; j < PWM_CHANNELS; j++) {
 			_d_b[(PWM_BITS - 1) - i] = (_d_b[(PWM_BITS - 1) - i] << 1)
 					| (((actLedValues[j]) >> ((PWM_BITS - 1) - i)) & 0x01);
 		}
@@ -526,22 +473,11 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	case reg_MASTER:
 		pwm_status = value;
 		break;
-		/*
-		 case reg_CRC_H:
-		 BYTEHIGH(crc) = value;
-		 break;
-		 case reg_CRC_L:
-		 BYTELOW(crc) = value;
-		 break;
-		 */
 	case reg_LED_L_0 ... reg_CRC_H:
 		(*((uint8_t *) (p_incLedValues) + reg)) = value;
 		break;
 	case reg_DATA_OK:
 		inc_pwm_data = value;
-		break;
-	case reg_EFFECT:
-		effect = value;
 		break;
 	}
 }
@@ -646,30 +582,9 @@ static uint16_t crc16_update(uint16_t crc, uint8_t a) {
 	return crc;
 }
 
-void led_flash() {
-	uint16_t l0, l1, l2;
-	l0 = actLedValues[0];
-	l1 = actLedValues[1];
-	l2 = actLedValues[2];
-	actLedValues[0] = 4095;
-	actLedValues[1] = 4095;
-	actLedValues[2] = 4095;
-	pwm_update();
-	_delay_ms(2);
-	actLedValues[0] = l0;
-	actLedValues[1] = l1;
-	actLedValues[2] = l2;
-	pwm_update();
-	return;
-}
-
-void led_storm() {
-	return;
-}
-
 uint8_t checkActLedVal() {
 	uint8_t lv = 0;
-	for (uint8_t i = 0; i < LEDS; i++) {
+	for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
 		if (actLedValues[i] != 0) {
 			lv = 1;
 			break;
@@ -712,8 +627,13 @@ int main(void) {
 
 	/*
 	 * Precteni a nastaveni TWI adresy
-	 * podle propojek na portech PB0, PB1, PB3
+	 * podle propojek na portech PB0, PB1, PB3, PB2
 	 */
+if (!(PINB & (1 << PB6))) {
+		//sepnuto, pocatecni adresa je TWIADDR2
+		twiaddr = TWIADDR2;
+}
+
 #ifdef DEBUG   //port B0 je debug output
 	if (!(PINB & (1 << PB3))) {twiaddr |= (1 << 3);}
 	if (!(PINB & (1 << PB1))) {twiaddr |= (1 << 2);}
@@ -751,23 +671,20 @@ int main(void) {
 
 	//start pwm
 	OCR0A = 0;
-
 	_pwm_init();
-
 	sei();
 
 	/*
 	 * test ventilatoru
-	 *
 	 */
 	set_fan(255);
 	_delay_ms(2000);
 	set_fan(0);
+	
 	/*
 	 * Inicializace teplomeru
 	 * start konverze
 	 */
-
 	if (therm_reset()) {
 		therm_ok = 0;
 		set_fan(FAN_MAX);
@@ -787,77 +704,30 @@ int main(void) {
 			;
 	}
 
-	/*
-	 * Precteni konfiguracnich prepinacu, nastaveni doby sviceni
-	 * pro autonomni provoz
-	 * pocitame cas od zapnuti
-	 * dle nastavenych propojek
-	 */
-#ifdef DEBUG
-	setDayTime = (520); setNightTime = 0;
-#else
-	switch ((twiaddr & 0b00001110) >> 1) {
-	case 1:
-		setDayTime = (10L * HOUR);
-		setNightTime = 0;
-		break;
-	case 2:
-		setDayTime = (11L * HOUR);
-		setNightTime = 0;
-		break;
-	case 3:
-		setDayTime = (12L * HOUR);
-		setNightTime = 0;
-		break;
-	case 4:
-		setDayTime = (10L * HOUR);
-		setNightTime = 1 * HOUR;
-		break;
-	case 5:
-		setDayTime = (11L * HOUR);
-		setNightTime = 1 * HOUR;
-		break;
-	case 6:
-		setDayTime = (12L * HOUR);
-		setNightTime = 1 * HOUR;
-		break;
-	default:
-		setDayTime = (10L * HOUR);
-		setNightTime = 0;
-	}
-
-#endif
-
 #define MASTER_TIMEOUT  2 //sec
 	//cekej  na pwm_status from master
 	uint8_t wait_tmp = 0;
 
-	//testujeme stav prepinace.
-	//pokud je sepnuto, pak jede demo provoz
-	//pokud je rozepnuto, oak cekame na master status
-	//pokud master status neprijde, jede autonomni provoz
-	//demo provoz lze pustit i z mastera zaslanim hodnoty 0xde
-	//do pwm_status
-	if (!(PINB & (1 << PB6))) {
-		//sepnuto, demo
-		pwm_status = DEMO;
-		;
-	} else {
-		//cekej na master status
-		while ((pwm_status != MASTER) || (pwm_status != DEMO)) {
+	// Cekame na master status
+	// pokud master status neprijde, demo provoz
+	// demo provoz lze pustit i z mastera zaslanim hodnoty 0xde
+	// do pwm_status
+	while ((pwm_status != MASTER) || (pwm_status != DEMO)) {
 			wdt_reset();
 			_delay_ms(1000);
 			if (++wait_tmp > MASTER_TIMEOUT)
+				pwm_status = DEMO;
 				break;
-		}
 	}
+
 	while (1) {
 		wdt_reset();
 
 		/*
 		 * Mereni teploty
 		 */
-		if (therm_ok && ((millis() - tempTicks) >= TEMPERATURE_DELAY)) { //precteni teploty a start nove konverze
+		if (therm_ok && ((millis() - tempTicks) >= TEMPERATURE_DELAY)) { 
+			//precteni teploty a start nove konverze
 			therm_reset();
 			therm_write_byte(THERM_CMD_SKIPROM);
 			therm_write_byte(THERM_CMD_RSCRATCHPAD);
@@ -875,7 +745,6 @@ int main(void) {
 			/*
 			 * ventilator dle teploty, pokud je ledval > 0
 			 */
-
 			if ((checkActLedVal() == 0)
 					&& (rawTemperature < TEMPERATURE_TRESHOLD_STOP)) {
 				set_fan(0);
@@ -918,18 +787,37 @@ int main(void) {
 
 		milis_time = millis();
 
-		switch (pwm_status) {
-		case EFFECT:
-			switch (effect) {
-			case FLASH:
-				led_flash();
-				break;
-			case STORM:
-				led_storm();
-				break;
-			}
-			effect = NO_EFFECT;
-		case MASTER:
+		if (pwm_status == DEMO) {
+			//demo provoz
+			//postupne  zapina kazdou led na hodnotu z tabulky pwmtable1 a pwmtable2
+			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
+				for (uint8_t v = 0; v < 170; v++) {
+					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
+					_delay_ms(2);
+					pwm_update();
+					wdt_reset();
+				}
+				for (uint8_t v = 0; v < 86; v++) {
+					actLedValues[i] = pgm_read_word(&pwmtable2[v]);
+					_delay_ms(2);
+					pwm_update();
+					wdt_reset();
+				}
+				for (uint8_t v = 85; v > 0; v--) {
+					actLedValues[i] = pgm_read_word(&pwmtable2[v]);
+					_delay_ms(2);
+					pwm_update();
+					wdt_reset();					
+				}				
+				for (uint8_t v = 169; v > 0; v--) {
+					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
+					_delay_ms(2);
+					pwm_update();
+					wdt_reset();
+				}
+				actLedValues[i] = 0;
+			}		
+		} else {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
 					xcrc = crc16_update(xcrc, LOW_BYTE(p_incLedValues[i]));
@@ -945,48 +833,16 @@ int main(void) {
 					interpolationStart = 1;
 				}
 				inc_pwm_data = 1;
-			}
-
-			break;		
-#ifdef DEMO_ENABLE
-		case DEMO:
-			//demo provoz
-			//postupne  zapina kazdou led na hodnotu 0 .. 250 .. 0
-			for (uint8_t i = 0; i < LEDS; i++) {
-				for (uint8_t v = 0; v < 170; v++) {
-					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();
-				}
-				for (uint8_t v = 169; v > 0; v--) {
-					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();
-				}
-				actLedValues[i] = 0;
-			}
-
-			//flash
-			led_flash();
-			_delay_ms(100);
-			led_flash();
-			_delay_ms(80);
-			led_flash();
-			//TODO: storm
-			led_storm();
-			break;
-#endif			
+			}		
 		}
 
-		// interpolace hodnot
-#define ISTEPS 100       //pocet kroku
+		// smooth led transition
+#define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
 		if (interpolationStart == 1) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
-				for (uint8_t x = 0; x < LEDS; x++) {
+				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
 							p_ledValues[x]);
 				}

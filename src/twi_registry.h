@@ -30,7 +30,6 @@
 #define reg_THERM_STATUS    17
 #define reg_RAW_THERM       18
 #define reg_MASTER    19
-#define reg_EFFECT    20
 
 #define reg_LED_0   0
 #define reg_LED_1   2
@@ -43,8 +42,5 @@
 #define reg_VERSION_MAIN  21
 #define reg_VERSION_SUB   22
 
-#define NO_EFFECT   0
-#define FLASH       1
-#define STORM       2
 
 #endif /* TWI_REGISTRY_H_ */
