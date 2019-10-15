@@ -102,11 +102,6 @@ uint8_t twiaddr = TWIADDR1;
 #define COUNT_PER_C     7
 #define SCRATCHPAD_CRC  8
 
-// rizeni chodu
-unsigned long tempTicks = 0;
-unsigned long timeTicks = 0;
-unsigned long milis_time = 0;
-unsigned long i_timeTicks = 0;
 	
 //teplomer
 int8_t therm_ok = 0;
@@ -186,22 +181,17 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #endif
 
 uint16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t actLedValues[PWM_CHANNELS] = { 0 };
 
-uint16_t *p_ledValues = ledValues;
-uint16_t *p_prevLedValues = prevLedValues;
 uint16_t *p_actLedValues = actLedValues;
 uint16_t *p_incLedValues = incLedValues;
 
-int8_t isteps = 0;
 
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
 uint8_t *_d;
 uint8_t *_d_b;
-uint8_t interpolationStart = 0; //flag
+
 
 volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
@@ -209,6 +199,10 @@ volatile uint8_t inc_pwm_data = 1;
 volatile uint8_t effect = 0;
 
 int16_t tmp;
+
+int8_t isteps = 0;
+unsigned long milis_time = 0;
+
 
 //interpolace s mezemi min a max, 8bit
 static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
@@ -463,9 +457,10 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 
 uint8_t i2cReadFromRegister(uint8_t reg) {
 	uint8_t ret = 0x00;
+
 	switch (reg) {
 	case reg_LED_L_0 ... reg_LED_H_6:
-		ret = (*((uint8_t *) (p_actLedValues) + reg));
+		ret = (*((uint8_t *) (p_actLedValues) + reg));		
 		break;
 	case reg_MASTER:
 		ret = pwm_status;
@@ -483,6 +478,7 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 		ret = VERSION_SUB;
 		break;
 	}
+	
 	return ret;
 }
 
@@ -582,6 +578,19 @@ int main(void) {
 #ifdef DEBUG
 	dbg_tx_init();
 #endif
+
+// rizeni chodu
+unsigned long tempTicks = 0;
+unsigned long i_timeTicks = 0;
+
+//priznak
+uint8_t interpolationStart = 0; 
+
+//bufer
+uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t *p_ledValues = ledValues;
+uint16_t *p_prevLedValues = prevLedValues;
 
 	_d = _data;
 	_d_b = _data_buff;
