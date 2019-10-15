@@ -16,7 +16,6 @@
 
 //TODO:  if overheat lower brightness
 
-//VERSION = cislo hlavni verze
  #ifdef (__AVR_ATtiny2313__)
 	#define VERSION      100
 #elif defined (__AVR_ATtiny4313__)
