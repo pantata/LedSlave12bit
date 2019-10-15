@@ -17,8 +17,12 @@
 //TODO:  if overheat lower brightness
 
 //VERSION = cislo hlavni verze
-#define VERSION          200
-#define VERSION_SUB      208
+ #ifdef (__AVR_ATtiny2313__)
+	#define VERSION      100
+#elif defined (__AVR_ATtiny4313__)
+	#define VERSION      200
+#endif
+#define VERSION_SUB      210
 
 #define F_CPU         16000000L
 
@@ -203,7 +207,7 @@ int16_t tmp;
 int8_t isteps = 0;
 unsigned long milis_time = 0;
 
-
+#if (VERSION == 200)
 //interpolace s mezemi min a max, 8bit
 static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 		uint8_t out_min, uint8_t out_max) {
@@ -211,9 +215,10 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 			+ out_min;
 	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
+#endif
 
 //linear interpolation
-static long map(long x, long in_min, long in_max, long out_min, long out_max) {
+static uint16_t map(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max) {
 	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 /*
@@ -329,6 +334,7 @@ void pwm_update(void) {
 	newData = 1;
 }
 
+#if (VERSION == 200) 
 /*
  * Rutiny pro teplomer
  *
@@ -435,7 +441,7 @@ static void therm_write_byte(uint8_t byte) {
 		byte >>= 1;
 	}
 }
-
+#endif
 /*
  * Rutiny pro i2c
  *
@@ -580,11 +586,13 @@ int main(void) {
 #endif
 
 // rizeni chodu
+#if (VERSION == 200)
 unsigned long tempTicks = 0;
+#endif
 unsigned long i_timeTicks = 0;
 
 //priznak
-uint8_t interpolationStart = 0; 
+uint8_t updateStart = 0; 
 
 //bufer
 uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
@@ -669,6 +677,7 @@ if (!(PINB & (1 << PB6))) {
 	_delay_ms(2000);
 	set_fan(0);
 	
+#if (VERSION == 200)
 	/*
 	 * Inicializace teplomeru
 	 * start konverze
@@ -691,6 +700,7 @@ if (!(PINB & (1 << PB6))) {
 		while (!therm_read_bit())
 			;
 	}
+#endif
 
 #define MASTER_TIMEOUT  2 //sec
 	//cekej  na pwm_status from master
@@ -711,6 +721,7 @@ if (!(PINB & (1 << PB6))) {
 	while (1) {
 		wdt_reset();
 
+#if (VERSION == 200)
 		/*
 		 * Mereni teploty
 		 */
@@ -766,7 +777,13 @@ if (!(PINB & (1 << PB6))) {
 				set_fan(FAN_MAX);
 			}
 		}
-
+#else //tiny 2313
+	if (checkActLedVal() == 0) {
+				set_fan(0);
+			} else {
+				set_fan(FAN_MAX);
+			}
+#endif 
 		/*
 		 *  Hlavni rizeni
 		 */
@@ -781,7 +798,8 @@ if (!(PINB & (1 << PB6))) {
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
 				p_ledValues[i] = DEMOLEDVALUE;
 			}
-			interpolationStart = 1;		
+			updateStart
+		 = 1;		
 		} else {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
@@ -795,7 +813,8 @@ if (!(PINB & (1 << PB6))) {
 					p_ledValues = p_incLedValues;
 					p_incLedValues = tmpptr;
 					//priznak startu interpolace
-					interpolationStart = 1;
+					updateStart
+				 = 1;
 				}
 				inc_pwm_data = 1;
 			}		
@@ -804,7 +823,8 @@ if (!(PINB & (1 << PB6))) {
 		// smooth led transition
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
-		if (interpolationStart == 1) {
+		if (updateStart
+	 == 1) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
@@ -813,7 +833,8 @@ if (!(PINB & (1 << PB6))) {
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
-					interpolationStart = 0;
+					updateStart
+				 = 0;
 					isteps = 0;
 				}
 				pwm_update();
