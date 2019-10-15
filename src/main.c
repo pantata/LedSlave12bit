@@ -16,7 +16,7 @@
 
 //TODO:  if overheat lower brightness
 
- #ifdef (__AVR_ATtiny2313__)
+ #if defined (__AVR_ATtiny2313__)
 	#define VERSION      100
 #elif defined (__AVR_ATtiny4313__)
 	#define VERSION      200
@@ -189,12 +189,10 @@ uint16_t actLedValues[PWM_CHANNELS] = { 0 };
 uint16_t *p_actLedValues = actLedValues;
 uint16_t *p_incLedValues = incLedValues;
 
-
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
 uint8_t *_d;
 uint8_t *_d_b;
-
 
 volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
