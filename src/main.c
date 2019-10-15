@@ -18,9 +18,10 @@
 
 //VERSION = cislo hlavni verze
 #define VERSION          200
-#define VERSION_SUB      207
+#define VERSION_SUB      208
 
 #define F_CPU         16000000L
+
 // includes
 #include <stddef.h>
 #include <string.h>
@@ -40,9 +41,10 @@
 #include "dbg_putchar.h"
 #endif
 
+#define DEMOLEDVALUE 100
+
 #define MASTER    0xFF
 #define DEMO      0xde
-#define EFFECT    0xef
 
 #define LOW_BYTE(x)    		(x & 0xff)
 #define HIGH_BYTE(x)       	((x >> 8) & 0xff)
@@ -105,29 +107,6 @@ unsigned long tempTicks = 0;
 unsigned long timeTicks = 0;
 unsigned long milis_time = 0;
 unsigned long i_timeTicks = 0;
-
-const uint8_t version PROGMEM = VERSION;
-const uint8_t version_sub PROGMEM = VERSION_SUB;
-
-const uint8_t pwmtable1[170] PROGMEM = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-		3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7,
-		7, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13, 13, 14,
-		14, 15, 15, 16, 16, 17, 17, 18, 19, 19, 20, 21, 21, 22, 23, 23, 24, 25,
-		26, 27, 27, 28, 29, 30, 31, 32, 33, 35, 36, 37, 38, 39, 41, 42, 43, 45,
-		46, 48, 49, 51, 53, 54, 56, 58, 60, 62, 64, 66, 68, 71, 73, 75, 78, 80,
-		83, 86, 89, 91, 95, 98, 101, 104, 108, 111, 115, 119, 123, 127, 131,
-		135, 140, 144, 149, 154, 159, 164, 170, 175, 181, 187, 193, 200, 206,
-		213, 220, 227, 235, 242, 250 };
-
-const uint16_t pwmtable2[86] PROGMEM = { 259, 267, 276, 285, 295, 304, 314, 325,
-		336, 347, 358, 370, 382, 395, 408, 421, 435, 450, 464, 480, 496, 512,
-		529, 546, 564, 583, 602, 622, 643, 664, 686, 708, 732, 756, 781, 807,
-		833, 861, 889, 919, 949, 980, 1013, 1046, 1081, 1116, 1153, 1191, 1231,
-		1271, 1313, 1357, 1402, 1448, 1496, 1545, 1596, 1649, 1703, 1759, 1818,
-		1878, 1940, 2004, 2070, 2138, 2209, 2282, 2357, 2435, 2515, 2598, 2684,
-		2773, 2864, 2959, 3057, 3158, 3262, 3370, 3481, 3596, 3715, 3837, 3964,
-		4000 };
 	
 //teplomer
 int8_t therm_ok = 0;
@@ -498,10 +477,10 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 		ret = rawTemperature;
 		break;
 	case reg_VERSION_MAIN:
-		ret = pgm_read_byte(&version);
+		ret = VERSION;
 		break;
 	case reg_VERSION_SUB:
-		ret = pgm_read_byte(&version_sub);
+		ret = VERSION_SUB;
 		break;
 	}
 	return ret;
@@ -788,35 +767,12 @@ if (!(PINB & (1 << PB6))) {
 		milis_time = millis();
 
 		if (pwm_status == DEMO) {
-			//demo provoz
-			//postupne  zapina kazdou led na hodnotu z tabulky pwmtable1 a pwmtable2
+			//test. provoz
+			//zapne kazdou led na testovaci hodnotu
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				for (uint8_t v = 0; v < 170; v++) {
-					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();
-				}
-				for (uint8_t v = 0; v < 86; v++) {
-					actLedValues[i] = pgm_read_word(&pwmtable2[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();
-				}
-				for (uint8_t v = 85; v > 0; v--) {
-					actLedValues[i] = pgm_read_word(&pwmtable2[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();					
-				}				
-				for (uint8_t v = 169; v > 0; v--) {
-					actLedValues[i] = pgm_read_byte(&pwmtable1[v]);
-					_delay_ms(2);
-					pwm_update();
-					wdt_reset();
-				}
-				actLedValues[i] = 0;
-			}		
+				p_ledValues[i] = DEMOLEDVALUE;
+			}
+			interpolationStart = 1;		
 		} else {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {

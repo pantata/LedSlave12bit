@@ -18,3 +18,4 @@ user.mk
 .pio/build/attiny4313/src/dbg_putchar.o
 .pio/build/attiny4313/src/main.o
 .pio/build/attiny4313/src/usiTwiSlave.o
+.pio/build/.sconsign3.dblite
