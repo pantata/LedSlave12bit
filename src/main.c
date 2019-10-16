@@ -214,7 +214,7 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 #endif
 
 //linear interpolation
-static uint16_t map(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max) {
+static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max) {
 	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 /*
@@ -698,7 +698,7 @@ if (!(PINB & (1 << PB6))) {
 	}
 #endif
 
-#define MASTER_TIMEOUT  2 //sec
+#define MASTER_TIMEOUT  10 //sec
 	//cekej  na pwm_status from master
 	uint8_t wait_tmp = 0;
 
@@ -706,12 +706,13 @@ if (!(PINB & (1 << PB6))) {
 	// pokud master status neprijde, demo provoz
 	// demo provoz lze pustit i z mastera zaslanim hodnoty 0xde
 	// do pwm_status
-	while ((pwm_status != MASTER) || (pwm_status != DEMO)) {
+	while (pwm_status == 0) {
 			wdt_reset();
 			_delay_ms(1000);
-			if (++wait_tmp > MASTER_TIMEOUT)
+			if (++wait_tmp > MASTER_TIMEOUT) {
 				pwm_status = DEMO;
 				break;
+			}
 	}
 
 	while (1) {
@@ -789,14 +790,7 @@ if (!(PINB & (1 << PB6))) {
 
 		milis_time = millis();
 
-		if (pwm_status == DEMO) {
-			//test. provoz
-			//zapne kazdou led na testovaci hodnotu
-			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				actLedValues[i] = DEMOLEDVALUE;				
-			}
-			pwm_update();
-		} else {
+		if (pwm_status == MASTER) {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
 					xcrc = crc16_update(xcrc, LOW_BYTE(p_incLedValues[i]));
@@ -813,6 +807,13 @@ if (!(PINB & (1 << PB6))) {
 				}
 				inc_pwm_data = 1;
 			}		
+		} else  if (pwm_status == DEMO) {
+			//test. provoz
+			//zapne kazdou led na testovaci hodnotu
+			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
+				p_ledValues[i] = DEMOLEDVALUE;				
+			}
+			updateStart = 1;			
 		}
 
 		// smooth led transition
