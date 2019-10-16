@@ -793,10 +793,9 @@ if (!(PINB & (1 << PB6))) {
 			//test. provoz
 			//zapne kazdou led na testovaci hodnotu
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				p_ledValues[i] = DEMOLEDVALUE;
+				actLedValues[i] = DEMOLEDVALUE;				
 			}
-			updateStart
-		 = 1;		
+			pwm_update();
 		} else {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
@@ -819,8 +818,7 @@ if (!(PINB & (1 << PB6))) {
 		// smooth led transition
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
-		if (updateStart
-	 == 1) {
+		if (updateStart == 1) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
