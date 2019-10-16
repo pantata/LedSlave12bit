@@ -14,14 +14,12 @@
  * 
  */
 
-//TODO:  if overheat lower brightness
-
  #if defined (__AVR_ATtiny2313__)
 	#define VERSION      100
 #elif defined (__AVR_ATtiny4313__)
 	#define VERSION      200
 #endif
-#define VERSION_SUB      210
+#define VERSION_SUB      211
 
 #define F_CPU         16000000L
 
@@ -75,6 +73,7 @@ uint8_t twiaddr = TWIADDR1;
 #define TEMPERATURE_MAX      40  //fan max
 #define FAN_MIN              80  //minimum pwm fan 30%
 #define FAN_MAX              255 //minimum pwm fan 30%
+#define TEMPERATURE_OVERHEAT 45 
 
 /* Utils */
 #define THERM_INPUT_MODE() 		THERM_DDR&=~(1<<THERM_DQ)
@@ -590,7 +589,7 @@ unsigned long i_timeTicks = 0;
 
 //priznak
 uint8_t updateStart = 0; 
-
+uint8_t overheat = 0;
 //bufer
 uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
@@ -757,6 +756,7 @@ if (!(PINB & (1 << PB6))) {
 						_delay_ms(500);
 						set_fan(fanVal);
 					}
+					overheat = rawTemperature > TEMPERATURE_OVERHEAT?1:0;
 				}
 			}
 			/*
@@ -810,8 +810,7 @@ if (!(PINB & (1 << PB6))) {
 					p_ledValues = p_incLedValues;
 					p_incLedValues = tmpptr;
 					//priznak startu interpolace
-					updateStart
-				 = 1;
+					updateStart=1;
 				}
 				inc_pwm_data = 1;
 			}		
@@ -827,11 +826,13 @@ if (!(PINB & (1 << PB6))) {
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
 							p_ledValues[x]);
+#if (VERSION == 200)
+					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];
+#endif							
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
-					updateStart
-				 = 0;
+					updateStart = 0;
 					isteps = 0;
 				}
 				pwm_update();
