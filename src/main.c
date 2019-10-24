@@ -1,6 +1,5 @@
 /*
  * main.c
- *
  *  Created on: 9. 7. 2015
  *      Author: LSL<ludek.slouf@gmail.com>
  *
