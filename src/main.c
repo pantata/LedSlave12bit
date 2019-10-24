@@ -18,10 +18,7 @@
 #elif defined (__AVR_ATtiny4313__)
 	#define VERSION      200
 #endif
-
-#include "version.h"
-
-//#define VERSION_SUB      212
+#define VERSION_SUB      212
 
 #define F_CPU         16000000L
 
