@@ -200,7 +200,7 @@ volatile uint8_t effect = 0;
 
 int16_t tmp;
 
-int8_t isteps = 0;
+
 unsigned long milis_time = 0;
 
 #if (VERSION == 200)
@@ -215,8 +215,18 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 
 //linear interpolation
 static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max) {
-	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+	int32_t tmp1 = (x - in_min) * (out_max - out_min);
+	int16_t tmp2 = in_max - in_min;
+	return (tmp1 / tmp2) + out_min;
 }
+
+/*
+//linear interpolation
+static inline long map(long x, long in_min, long in_max, long out_min,
+		long out_max) {
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}*/
+
 /*
  * PWM / bit angle modulation
  */
@@ -596,6 +606,8 @@ uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t *p_ledValues = ledValues;
 uint16_t *p_prevLedValues = prevLedValues;
 
+int8_t isteps = 0;
+
 	_d = _data;
 	_d_b = _data_buff;
 
@@ -816,26 +828,32 @@ if (!(PINB & (1 << PB6))) {
 			updateStart = 1;			
 		}
 
-		// smooth led transition
+// smooth led transition
+		if (updateStart == 1) {
+#if (VERSION == 200)
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
-		if (updateStart == 1) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
-							p_ledValues[x]);
-#if (VERSION == 200)
-					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];
-#endif							
+						p_ledValues[x]);
+					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
 					updateStart = 0;
 					isteps = 0;
-				}
-				pwm_update();
+				}				
 			}
-		}
+#else
+	
+			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
+				actLedValues[x] = overheat?	p_ledValues[x] / 2:	p_ledValues[x];	
+			}						
+			updateStart = 0;
+#endif
+			pwm_update();
+		}								
 	}
 }
