@@ -691,7 +691,6 @@ if (!(PINB & (1 << PB6))) {
 	 */
 	if (therm_reset()) {
 		therm_ok = 0;
-		set_fan(FAN_MAX);
 	} else {
 		therm_ok = 1;
 		therm_reset();
@@ -778,7 +777,9 @@ if (!(PINB & (1 << PB6))) {
 			therm_write_byte(THERM_CMD_SKIPROM);
 			therm_write_byte(THERM_CMD_CONVERTTEMP);
 			tempTicks = millis();
-		} else {
+		} 
+		
+		if (!therm_ok) {
 			//teplomer nefunguje, ale chladit potrebujeme
 			if (checkActLedVal() == 0) {
 				set_fan(0);
@@ -786,6 +787,7 @@ if (!(PINB & (1 << PB6))) {
 				set_fan(FAN_MAX);
 			}
 		}
+
 #else //tiny 2313
 	if (checkActLedVal() == 0) {
 				set_fan(0);
@@ -793,10 +795,11 @@ if (!(PINB & (1 << PB6))) {
 				set_fan(FAN_MAX);
 			}
 #endif 
+
+
 		/*
 		 *  Hlavni rizeni
 		 */
-
 		uint16_t xcrc = 0xffff;
 
 		milis_time = millis();
@@ -848,7 +851,7 @@ if (!(PINB & (1 << PB6))) {
 #else
 	
 			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-				actLedValues[x] = overheat?	p_ledValues[x] / 2:	p_ledValues[x];	
+				actLedValues[x] = p_ledValues[x];	
 			}						
 			updateStart = 0;
 #endif
