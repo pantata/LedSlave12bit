@@ -118,6 +118,10 @@ int16_t val, nval = 0;
 #define PWM_BITS      12
 #define PWM_CHANNELS  7
 
+//sw resistor - set max current for channel
+// uv, rb, white, red, green, yellow, blue
+const uint8_t sw_resistor[PWM_CHANNELS] = {35,100,100,100,100,70,70};
+
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
 
@@ -840,6 +844,8 @@ if (!(PINB & (1 << PB6))) {
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
 						p_ledValues[x]);
+					//upravime hodnotu dle max. proudu
+					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
 					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}
 				isteps++;
@@ -851,7 +857,8 @@ if (!(PINB & (1 << PB6))) {
 #else
 	
 			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-				actLedValues[x] = p_ledValues[x];	
+				actLedValues[x] = p_ledValues[x];
+				actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];	
 			}						
 			updateStart = 0;
 #endif
