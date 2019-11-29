@@ -112,14 +112,20 @@ uint16_t crc = 0xFFFF;
 
 // pwm
 int16_t val, nval = 0;
-#define PWM_FREQ      240    //480
+#if VERSION == 100
+	#define PWM_FREQ      480    //nemerime teplotu, muzeme mit vetsi frekvenci
+#else
+	#define PWM_FREQ      240    
+#endif
 #define LED_PORT      PORTD  // Port for PWM
 #define LED_DIR       DDRD   // Register for PWM
 #define PWM_BITS      12
 #define PWM_CHANNELS  7
 
 //sw resistor - set max current for channel
+// Rs resitor = 0.1 Ohm
 // uv, rb, white, red, green, yellow, blue
+// Iout = (0.1 * D) /  Rs
 const uint8_t sw_resistor[PWM_CHANNELS] = {35,100,100,100,100,70,70};
 
 volatile uint8_t loop = 0;
@@ -202,7 +208,6 @@ volatile uint8_t inc_pwm_data = 1;
 volatile uint8_t effect = 0;
 
 int16_t tmp;
-
 
 unsigned long milis_time = 0;
 
@@ -343,7 +348,7 @@ void pwm_update(void) {
 	newData = 1;
 }
 
-#if (VERSION == 200) 
+#if (VERSION == 200)
 /*
  * Rutiny pro teplomer
  *
@@ -450,12 +455,14 @@ static void therm_write_byte(uint8_t byte) {
 		byte >>= 1;
 	}
 }
+
 #endif
+
+
 /*
  * Rutiny pro i2c
  *
  */
-
 void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	switch (reg) {
 	case reg_MASTER:
@@ -497,6 +504,7 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	return ret;
 }
 
+#if (VERSION == 200)
 /*
  * Milis()
  */
@@ -540,6 +548,7 @@ unsigned long millis() {
 	SREG = oldSREG;
 	return m;
 }
+#endif
 
 /*
  * Hlavni smycka
@@ -597,19 +606,19 @@ int main(void) {
 // rizeni chodu
 #if (VERSION == 200)
 unsigned long tempTicks = 0;
-#endif
 unsigned long i_timeTicks = 0;
+uint8_t overheat = 0;
+int8_t isteps = 0;
+#endif
 
 //priznak
 uint8_t updateStart = 0; 
-uint8_t overheat = 0;
+
 //bufer
 uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t *p_ledValues = ledValues;
 uint16_t *p_prevLedValues = prevLedValues;
-
-int8_t isteps = 0;
 
 	_d = _data;
 	_d_b = _data_buff;
@@ -805,9 +814,9 @@ if (!(PINB & (1 << PB6))) {
 		 *  Hlavni rizeni
 		 */
 		uint16_t xcrc = 0xffff;
-
+#if (VERSION == 200)
 		milis_time = millis();
-
+#endif
 		if (pwm_status == MASTER) {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
@@ -834,9 +843,10 @@ if (!(PINB & (1 << PB6))) {
 			updateStart = 1;			
 		}
 
-// smooth led transition
+
 		if (updateStart == 1) {
 #if (VERSION == 200)
+// smooth led transition
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
@@ -847,7 +857,7 @@ if (!(PINB & (1 << PB6))) {
 					//softwarove omezeni proudu
 					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
 					//omezeni pri prehrati ?? :TODO
-					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
+					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}
 				isteps++;
 				if (isteps > ISTEPS) {
@@ -855,8 +865,7 @@ if (!(PINB & (1 << PB6))) {
 					isteps = 0;
 				}				
 			}
-#else
-	
+#else	
 			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 				actLedValues[x] = p_ledValues[x];
 				actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];	
