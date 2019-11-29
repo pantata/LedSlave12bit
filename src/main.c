@@ -844,8 +844,9 @@ if (!(PINB & (1 << PB6))) {
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
 						p_ledValues[x]);
-					//upravime hodnotu dle max. proudu
+					//softwarove omezeni proudu
 					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
+					//omezeni pri prehrati ?? :TODO
 					actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}
 				isteps++;
