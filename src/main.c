@@ -71,26 +71,26 @@ uint8_t twiaddr = TWIADDR1;
 #define TEMPERATURE_TRESHOLD_STOP 40  //fan off, when led is off
 #define TEMPERATURE_MAX      40  //fan max
 #define FAN_MIN              80  //minimum pwm fan 30%
-#define FAN_MAX              255 //minimum pwm fan 30%
+#define FAN_MAX              255 //max pwm fan 100%
 #define TEMPERATURE_OVERHEAT 45 
 
 /* Utils */
 #define THERM_INPUT_MODE() 		THERM_DDR&=~(1<<THERM_DQ)
 #define THERM_OUTPUT_MODE()		THERM_DDR|=(1<<THERM_DQ)
-#define THERM_LOW() 				THERM_PORT&=~(1<<THERM_DQ)
+#define THERM_LOW() 			THERM_PORT&=~(1<<THERM_DQ)
 #define THERM_HIGH() 			THERM_PORT|=(1<<THERM_DQ)
 
-#define THERM_CMD_CONVERTTEMP 0x44
-#define THERM_CMD_RSCRATCHPAD 0xbe
-#define THERM_CMD_WSCRATCHPAD 0x4e
+#define THERM_CMD_CONVERTTEMP 	0x44
+#define THERM_CMD_RSCRATCHPAD 	0xbe
+#define THERM_CMD_WSCRATCHPAD 	0x4e
 #define THERM_CMD_CPYSCRATCHPAD 0x48
-#define THERM_CMD_RECEEPROM 0xb8
-#define THERM_CMD_RPWRSUPPLY 0xb4
-#define THERM_CMD_SEARCHROM 0xf0
-#define THERM_CMD_READROM 0x33
-#define THERM_CMD_MATCHROM 0x55
-#define THERM_CMD_SKIPROM 0xcc
-#define THERM_CMD_ALARMSEARCH 0xec
+#define THERM_CMD_RECEEPROM 	0xb8
+#define THERM_CMD_RPWRSUPPLY 	0xb4
+#define THERM_CMD_SEARCHROM 	0xf0
+#define THERM_CMD_READROM 		0x33
+#define THERM_CMD_MATCHROM 		0x55
+#define THERM_CMD_SKIPROM 		0xcc
+#define THERM_CMD_ALARMSEARCH 	0xec
 
 // Scratchpad locations
 #define TEMP_LSB        0
@@ -112,7 +112,7 @@ uint16_t crc = 0xFFFF;
 
 // pwm
 int16_t val, nval = 0;
-#if VERSION == 100
+#if (VERSION == 100)
 	#define PWM_FREQ      480    //nemerime teplotu, muzeme mit vetsi frekvenci
 #else
 	#define PWM_FREQ      240    
@@ -219,7 +219,6 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 			+ out_min;
 	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
-#endif
 
 //linear interpolation
 static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max) {
@@ -227,6 +226,7 @@ static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, i
 	int16_t tmp2 = in_max - in_min;
 	return (tmp1 / tmp2) + out_min;
 }
+#endif
 
 /*
 //linear interpolation
@@ -236,7 +236,7 @@ static inline long map(long x, long in_min, long in_max, long out_min,
 }*/
 
 /*
- * PWM / bit angle modulation
+ * NO-PWM / bit angle modulation
  */
 // Timer1 handler.
 ISR(TIMER1_COMPB_vect) {
@@ -326,7 +326,7 @@ static void _pwm_init(void) {
 	LED_PORT = 0x00;   //off
 	OCR1A = tbl_loop_len[MAX_LOOP] + 1;
 	TCCR1B = 1 << WGM12 | 1 << CS10; // CTC-mode, F_CPU / 1
-	TIMSK |= 1 << OCIE1B;  		  //start timer
+	TIMSK |= 1 << OCIE1B;  		     //start timer
 }
 
 void pwm_update(void) {
@@ -581,10 +581,10 @@ static uint16_t crc16_update(uint16_t crc, uint8_t a) {
 	return crc;
 }
 
-uint8_t checkActLedVal() {
+static uint8_t checkActLedVal() {
 	uint8_t lv = 0;
 	for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-		if (actLedValues[i] != 0) {
+		if (actLedValues[i] > 0) {
 			lv = 1;
 			break;
 		}
@@ -620,7 +620,7 @@ uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
 uint16_t *p_ledValues = ledValues;
 uint16_t *p_prevLedValues = prevLedValues;
 
-	_d = _data;
+	_d = _data; 
 	_d_b = _data_buff;
 
 	//disable irq
@@ -637,7 +637,7 @@ uint16_t *p_prevLedValues = prevLedValues;
 	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6); //| (1 << PB0) ; PB0 je debug output
 	DDRB &= ~(1 << PB1) & ~(1 << PB3) & ~(1 << PB6);//& ~(1 << PB0) ;
 #else
-	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6) | (1 << PB0);
+	PORTB |= (1 << PB1) | (1 << PB3) | (1 << PB6) | (1 << PB0);	
 	DDRB &= ~(1 << PB1) & ~(1 << PB3) & ~(1 << PB6) & ~(1 << PB0);
 #endif
 
@@ -645,25 +645,19 @@ uint16_t *p_prevLedValues = prevLedValues;
 	 * Precteni a nastaveni TWI adresy
 	 * podle propojek na portech PB0, PB1, PB3, PB2
 	 */
+	 /*
 if (!(PINB & (1 << PB6))) {
 		//sepnuto, pocatecni adresa je TWIADDR2
 		twiaddr = TWIADDR2;
 }
-
+  */
 #ifdef DEBUG   //port B0 je debug output
 	if (!(PINB & (1 << PB3))) {twiaddr |= (1 << 3);}
 	if (!(PINB & (1 << PB1))) {twiaddr |= (1 << 2);}
 	twiaddr |= (1 << 1);
 #else
-	if (!(PINB & (1 << PB3))) {
-		twiaddr |= (1 << 3);
-	}
-	if (!(PINB & (1 << PB1))) {
-		twiaddr |= (1 << 2);
-	}
-	if (!(PINB & (1 << PB0))) {
-		twiaddr |= (1 << 1);
-	}
+	twiaddr = ((PINB & 0b00000011) << 1);
+	twiaddr |= TWIADDR2 | twiaddr | (PINB & 0b00001000);
 #endif
 
 	usiTwiSlaveInit(twiaddr, i2cReadFromRegister, i2cWriteToRegister);
@@ -737,7 +731,7 @@ if (!(PINB & (1 << PB6))) {
 				break;
 			}
 	}
-
+    // main loop
 	while (1) {
 		wdt_reset();
 
