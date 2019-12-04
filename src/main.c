@@ -191,11 +191,11 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #define WAIT_7c  505
 #endif
 
-uint16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t actLedValues[PWM_CHANNELS] = { 0 };
+int16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
+int16_t actLedValues[PWM_CHANNELS] = { 0 };
 
-uint16_t *p_actLedValues = actLedValues;
-uint16_t *p_incLedValues = incLedValues;
+int16_t *p_actLedValues = actLedValues;
+int16_t *p_incLedValues = incLedValues;
 
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
@@ -219,14 +219,13 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 			+ out_min;
 	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
-
-//linear interpolation
 static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max) {
 	int32_t tmp1 = (x - in_min) * (out_max - out_min);
 	int16_t tmp2 = in_max - in_min;
 	return (tmp1 / tmp2) + out_min;
 }
 #endif
+
 
 /*
 //linear interpolation
@@ -318,15 +317,6 @@ ISR(TIMER1_COMPB_vect) {
 		__builtin_avr_delay_cycles(28L);
 	}
 
-}
-
-static void _pwm_init(void) {
-	// Hardware init.
-	LED_DIR = 0xFF; //led pins output
-	LED_PORT = 0x00;   //off
-	OCR1A = tbl_loop_len[MAX_LOOP] + 1;
-	TCCR1B = 1 << WGM12 | 1 << CS10; // CTC-mode, F_CPU / 1
-	TIMSK |= 1 << OCIE1B;  		     //start timer
 }
 
 void pwm_update(void) {
@@ -504,7 +494,7 @@ uint8_t i2cReadFromRegister(uint8_t reg) {
 	return ret;
 }
 
-#if (VERSION == 200)
+
 /*
  * Milis()
  */
@@ -548,12 +538,6 @@ unsigned long millis() {
 	SREG = oldSREG;
 	return m;
 }
-#endif
-
-/*
- * Hlavni smycka
- *
- */
 
 static void set_fan(uint8_t pwm) {
 	ATOMIC_BLOCK(ATOMIC_FORCEON)
@@ -594,7 +578,6 @@ static uint8_t checkActLedVal() {
 
 /**************************************
  * Main routine
- *
  *************************************/
 
 int main(void) {
@@ -604,21 +587,20 @@ int main(void) {
 #endif
 
 // rizeni chodu
-#if (VERSION == 200)
 unsigned long tempTicks = 0;
 unsigned long i_timeTicks = 0;
 uint8_t overheat = 0;
-int8_t isteps = 0;
-#endif
+int8_t istep = 0;
+
 
 //priznak
 uint8_t updateStart = 0; 
 
 //bufer
-uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t *p_ledValues = ledValues;
-uint16_t *p_prevLedValues = prevLedValues;
+int16_t ledValues[PWM_CHANNELS + 1] = { 0 };
+int16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
+int16_t *p_ledValues = ledValues;
+int16_t *p_prevLedValues = prevLedValues;
 
 	_d = _data; 
 	_d_b = _data_buff;
@@ -681,17 +663,20 @@ if (!(PINB & (1 << PB6))) {
 
 	//start pwm
 	OCR0A = 0;
-	_pwm_init();
+
+	// Hardware init.
+	LED_DIR = 0xFF; //led pins output
+	LED_PORT = 0x00;   //off
+	OCR1A = tbl_loop_len[MAX_LOOP] + 1;
+	TCCR1B = 1 << WGM12 | 1 << CS10; // CTC-mode, F_CPU / 1
+	TIMSK |= 1 << OCIE1B;  		     //start timer
+
 	sei();
 
-	/*
-	 * test ventilatoru
-	 */
+#if (VERSION == 200)
 	set_fan(255);
 	_delay_ms(2000);
 	set_fan(0);
-	
-#if (VERSION == 200)
 	/*
 	 * Inicializace teplomeru
 	 * start konverze
@@ -808,9 +793,9 @@ if (!(PINB & (1 << PB6))) {
 		 *  Hlavni rizeni
 		 */
 		uint16_t xcrc = 0xffff;
-#if (VERSION == 200)
+
 		milis_time = millis();
-#endif
+
 		if (pwm_status == MASTER) {
 			if (inc_pwm_data == 0) {  //dostali jsme data, kontrola CRC
 				for (uint8_t i = 0; i < 8; i++) {
@@ -830,7 +815,7 @@ if (!(PINB & (1 << PB6))) {
 			}		
 		} else  if (pwm_status == DEMO) {
 			//test. provoz
-			//zapne kazdou led na testovaci hodnotu
+			//zapne kazdou led na testovaci hodnotu			
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
 				p_ledValues[i] = DEMOLEDVALUE;				
 			}
@@ -839,34 +824,23 @@ if (!(PINB & (1 << PB6))) {
 
 
 		if (updateStart == 1) {
-#if (VERSION == 200)
-// smooth led transition
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-					actLedValues[x] = map(isteps, 0, ISTEPS, p_prevLedValues[x],
-						p_ledValues[x]);
+					actLedValues[x] =  p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS);	
 					//softwarove omezeni proudu
 					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
-				}
-				isteps++;
-				if (isteps > ISTEPS) {
-					updateStart = 0;
-					isteps = 0;
 				}				
-			}
-#else	
-			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-				actLedValues[x] = p_ledValues[x];
-				actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];	
-			}						
-			updateStart = 0;
-#endif
-			pwm_update();
+				if (++istep > ISTEPS) {
+					updateStart = 0;
+					istep = 0;
+				}
+				pwm_update();				
+			}			
 		}								
 	}
 }
