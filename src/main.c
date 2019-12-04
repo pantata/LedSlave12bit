@@ -112,11 +112,8 @@ uint16_t crc = 0xFFFF;
 
 // pwm
 int16_t val, nval = 0;
-#if VERSION == 100
-	#define PWM_FREQ      480    //nemerime teplotu, muzeme mit vetsi frekvenci
-#else
-	#define PWM_FREQ      240    
-#endif
+
+#define PWM_FREQ      240    
 #define LED_PORT      PORTD  // Port for PWM
 #define LED_DIR       DDRD   // Register for PWM
 #define PWM_BITS      12
@@ -157,7 +154,7 @@ volatile uint8_t bitmask = 0;
  *  	-  TODO: overit dobu trvani preruseni pri I2C komunikaci
  */
 
-#if (PWM_FREQ == 480)
+#if (PWM_FREQ == 480) //test version
 #define LOOP_COUNT 9
 #define MAX_LOOP   LOOP_COUNT-1
 const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
@@ -868,7 +865,7 @@ if (!(PINB & (1 << PB6))) {
 #else	
 			for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 				actLedValues[x] = p_ledValues[x];
-				actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];	
+				//actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];	
 			}						
 			updateStart = 0;
 #endif
