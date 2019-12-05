@@ -829,7 +829,7 @@ if (!(PINB & (1 << PB6))) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-					actLedValues[x] =  p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS);	
+					actLedValues[x] =  (p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS));	
 					//softwarove omezeni proudu
 					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
 					//omezeni pri prehrati ?? :TODO
