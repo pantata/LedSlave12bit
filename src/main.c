@@ -126,7 +126,7 @@ int16_t val, nval = 0;
 // Rs resitor = 0.1 Ohm
 // uv, rb, white, red, green, yellow, blue
 // Iout = (0.1 * D) /  Rs
-const uint8_t sw_resistor[PWM_CHANNELS] = {35,100,100,100,100,70,70};
+const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {35,100,100,100,100,70,70};
 
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
@@ -191,11 +191,11 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #define WAIT_7c  505
 #endif
 
-int16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
-int16_t actLedValues[PWM_CHANNELS] = { 0 };
+uint16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t actLedValues[PWM_CHANNELS] = { 0 };
 
-int16_t *p_actLedValues = actLedValues;
-int16_t *p_incLedValues = incLedValues;
+uint16_t *p_actLedValues = actLedValues;
+uint16_t *p_incLedValues = incLedValues;
 
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
@@ -597,10 +597,10 @@ int8_t istep = 0;
 uint8_t updateStart = 0; 
 
 //bufer
-int16_t ledValues[PWM_CHANNELS + 1] = { 0 };
-int16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
-int16_t *p_ledValues = ledValues;
-int16_t *p_prevLedValues = prevLedValues;
+uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
+uint16_t *p_ledValues = ledValues;
+uint16_t *p_prevLedValues = prevLedValues;
 
 	_d = _data; 
 	_d_b = _data_buff;
@@ -822,7 +822,6 @@ if (!(PINB & (1 << PB6))) {
 			updateStart = 1;			
 		}
 
-
 		if (updateStart == 1) {
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
@@ -831,7 +830,7 @@ if (!(PINB & (1 << PB6))) {
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					actLedValues[x] =  (p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS));	
 					//softwarove omezeni proudu
-					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
+					actLedValues[x] = pgm_read_byte(&sw_resistor[x]) <100 ? (actLedValues[x] * pgm_read_byte(&sw_resistor[x]))/100:actLedValues[x];
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}				
