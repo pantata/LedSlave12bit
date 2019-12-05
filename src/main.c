@@ -700,7 +700,7 @@ if (!(PINB & (1 << PB6))) {
 	}
 #endif
 
-#define MASTER_TIMEOUT  10 //sec
+#define MASTER_TIMEOUT  2 //sec
 	//cekej  na pwm_status from master
 	uint8_t wait_tmp = 0;
 
@@ -817,9 +817,10 @@ if (!(PINB & (1 << PB6))) {
 			//test. provoz
 			//zapne kazdou led na testovaci hodnotu			
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				p_ledValues[i] = DEMOLEDVALUE;				
+				actLedValues[i] = 1000;				
 			}
-			updateStart = 1;			
+			//updateStart = 1;			
+			pwm_update();
 		}
 
 
@@ -829,9 +830,9 @@ if (!(PINB & (1 << PB6))) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-					actLedValues[x] =  p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS);	
+					actLedValues[x] =  p_ledValues[x]; //p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS);	
 					//softwarove omezeni proudu
-					actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
+					//actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}				
