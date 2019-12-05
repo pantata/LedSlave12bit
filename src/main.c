@@ -191,11 +191,11 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #define WAIT_7c  505
 #endif
 
-uint16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t actLedValues[PWM_CHANNELS] = { 0 };
+int16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
+int16_t actLedValues[PWM_CHANNELS] = { 0 };
 
-uint16_t *p_actLedValues = actLedValues;
-uint16_t *p_incLedValues = incLedValues;
+int16_t *p_actLedValues = actLedValues;
+int16_t *p_incLedValues = incLedValues;
 
 uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
@@ -597,10 +597,10 @@ int8_t istep = 0;
 uint8_t updateStart = 0; 
 
 //bufer
-uint16_t ledValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
-uint16_t *p_ledValues = ledValues;
-uint16_t *p_prevLedValues = prevLedValues;
+int16_t ledValues[PWM_CHANNELS + 1] = { 0 };
+int16_t prevLedValues[PWM_CHANNELS + 1] = { 0 };
+int16_t *p_ledValues = ledValues;
+int16_t *p_prevLedValues = prevLedValues;
 
 	_d = _data; 
 	_d_b = _data_buff;
@@ -804,7 +804,7 @@ if (!(PINB & (1 << PB6))) {
 				}
 
 				if (xcrc == 0) {
-					uint16_t *tmpptr = p_prevLedValues;
+					int16_t *tmpptr = p_prevLedValues;
 					p_prevLedValues = p_ledValues;
 					p_ledValues = p_incLedValues;
 					p_incLedValues = tmpptr;
@@ -828,9 +828,11 @@ if (!(PINB & (1 << PB6))) {
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-					actLedValues[x] =  (p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS));	
+					int16_t tmp = istep * (p_ledValues[x] - p_prevLedValues[x]);
+					actLedValues[x] =  p_prevLedValues[x] + (  tmp / ISTEPS);	
 					//softwarove omezeni proudu
-					actLedValues[x] = pgm_read_byte(&sw_resistor[x]) <100 ? (actLedValues[x] * pgm_read_byte(&sw_resistor[x]))/100:actLedValues[x];
+					uint8_t res = pgm_read_byte(&sw_resistor[x]);
+					actLedValues[x] = (actLedValues[x] * res)/100;
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}				
