@@ -126,7 +126,7 @@ int16_t val, nval = 0;
 // Rs resitor = 0.1 Ohm
 // uv, rb, white, red, green, yellow, blue
 // Iout = (0.1 * D) /  Rs
-const uint8_t sw_resistor[PWM_CHANNELS] = {35,100,100,100,100,70,70};
+const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {35,100,100,100,100,70,70};
 
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
@@ -804,7 +804,7 @@ if (!(PINB & (1 << PB6))) {
 				}
 
 				if (xcrc == 0) {
-					uint16_t *tmpptr = p_prevLedValues;
+					int16_t *tmpptr = p_prevLedValues;
 					p_prevLedValues = p_ledValues;
 					p_ledValues = p_incLedValues;
 					p_incLedValues = tmpptr;
@@ -823,16 +823,17 @@ if (!(PINB & (1 << PB6))) {
 			pwm_update();
 		}
 
-
 		if (updateStart == 1) {
 #define ISTEPS       100 //pocet kroku
 #define ISTEPTIMEOUT 10  //ms mezi kroky, celkovy cas prechodu ms = ISTEPS * ISTEPTIMEOUT
 			if ((milis_time - i_timeTicks) > ISTEPTIMEOUT) {
 				i_timeTicks = milis_time;
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
-					actLedValues[x] =  p_ledValues[x]; //p_prevLedValues[x] + (istep * (p_ledValues[x] - p_prevLedValues[x])/ISTEPS);	
+					int16_t tmp = istep * (p_ledValues[x] - p_prevLedValues[x]);
+					actLedValues[x] =  p_prevLedValues[x] + (  tmp / ISTEPS);	
 					//softwarove omezeni proudu
-					//actLedValues[x] = sw_resistor[x] <100 ? (actLedValues[x] * sw_resistor[x])/100:actLedValues[x];
+					uint8_t res = pgm_read_byte(&sw_resistor[x]);
+					actLedValues[x] = (actLedValues[x] * res)/100;
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}				
