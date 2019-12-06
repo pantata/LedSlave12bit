@@ -11,11 +11,12 @@
  * 		B6 : Pocatecni TWI adresa
  *      D0 - D6: OUT pwm
  * 
+ *	Verze pro attiny 2313
  */
 
  
 #define VERSION      100
-#define VERSION_SUB  1
+#define VERSION_SUB  2
 
 #define F_CPU         16000000L
 
@@ -66,6 +67,8 @@ int16_t val, nval = 0;
 //sw resistor - set max current for channel
 // Rs resitor = 0.1 Ohm
 // uv, rb, white, red, green, yellow, blue
+// 
+//na konektoru zleva, pohled shora, konektor smeruje ke me,
 // Iout = (0.1 * D) /  Rs
 const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {35,100,100,100,100,70,70};
 
@@ -89,12 +92,7 @@ volatile uint8_t bitmask = 0;
  *  nejdelsi okno mezi prerusenimi je cca 1000 uS (1/2 11 bitu
  *  ostatni okna jsou cca 100, 200, 500 uS
  *
- *  pro reset teplomeru potrebujeme okno o delce cca 520uS
- *  takze cekame na nastaveni OCR1B na 45045, pak mame cca 1000uS na reset teplomeru
- *
  *  vyznamnou chybu muzou zpusobit dalsi preruseni
- *  	-  funkce milis(), ktera trva ...4,5 uS, takze by neme byt problem = max chyba je cca 3.5%
- *  			a pouze u vyssich bitu
  *  	-  TODO: overit dobu trvani preruseni pri I2C komunikaci
  */
 
@@ -124,6 +122,7 @@ uint8_t _data[PWM_BITS] = { 0 };      //double buffer for port values
 uint8_t _data_buff[PWM_BITS] = { 0 };
 uint8_t *_d;
 uint8_t *_d_b;
+uint8_t updateStart = 0;
 
 volatile unsigned char newData = 0; //flag
 volatile uint8_t pwm_status = 0;
@@ -216,16 +215,24 @@ ISR(TIMER1_COMPB_vect) {
 	}
 
 }
+	uint32_t l = 0;
+	uint8_t r = 0;
+	int16_t led_r = 0;
 
 void pwm_update(void) {
+	
 	//clear
+	l = 0;
+	r = 0;
+	led_r = 0;
 	memset(_d_b, 0, 12);
 					
 	//rearrange values to ports
 	for (int i = 0; i < PWM_BITS; i++) {
 		for (int j = 0; j < PWM_CHANNELS; j++) {
-			uint8_t r = pgm_read_byte(&sw_resistor[j]);
-			int16_t led_r = (p_ledValues[j] * r)/100;
+			r = pgm_read_byte(&sw_resistor[j]);
+			l = (uint32_t)(p_ledValues[j]) * r;
+			led_r = l/100UL;
 			_d_b[(PWM_BITS - 1) - i] = (_d_b[(PWM_BITS - 1) - i] << 1)
 					| (((led_r) >> ((PWM_BITS - 1) - i)) & 0x01);
 		}
@@ -248,6 +255,7 @@ void i2cWriteToRegister(uint8_t reg, uint8_t value) {
 	switch (reg) {
 	case reg_MASTER:
 		pwm_status = value;
+		updateStart = 0;			
 		break;
 	case reg_LED_L_0 ... reg_CRC_H:
 		(*((uint8_t *) (p_incLedValues) + reg)) = value;
@@ -322,8 +330,6 @@ static uint8_t checkActLedVal() {
 	return lv;
 }
 
-ISR(TIMER0_OVF_vect) {}
-
 /**************************************
  * Main routine
  *************************************/
@@ -383,8 +389,9 @@ if (!(PINB & (1 << PB6))) {
 	 */
 	DDRB |= (1 << PB2);  //B2 na output
 
-	TIFR |= (1 << TOV0);
-	TIMSK |= (1 << TOIE0);
+	//povoleni interruptu pro timer0 - millis()
+	//TIFR |= (1 << TOV0);
+	//TIMSK |= (1 << TOIE0);
 
 	TCCR0B |= (1 << CS01); // prescale 8
 
@@ -443,21 +450,27 @@ if (!(PINB & (1 << PB6))) {
 				if (xcrc == 0) {
 					int16_t *tmpptr = p_incLedValues;
 					p_incLedValues = p_ledValues;
-					p_ledValues = tmpptr;
-					pwm_update();
+					p_ledValues = tmpptr;					
+					updateStart = 1; 
 				}
 				inc_pwm_data = 1;
 			}		
 		} else  if (pwm_status == DEMO) {
 			//test. provoz
-			//zapne kazdou led na testovaci hodnotu			
+			//zapne kazdou led na testovaci hodnotu				
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				p_ledValues[i] = 1000;	
+				ledValues[i] = 100;	
 
 			}
-			//updateStart = 1;			
-			pwm_update();
-			_delay_ms(1000);
-		}								
+			if (updateStart == 0) {
+				updateStart = 2;	
+				pwm_update();
+			}					
+			
+		}
+		if (updateStart == 1) {
+			 pwm_update();								
+			 updateStart = 0;
+		}
 	}
 }
