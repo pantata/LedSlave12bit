@@ -13,12 +13,10 @@
  * 
  */
 
- #if defined (__AVR_ATtiny2313__)
-	#define VERSION      100
-#elif defined (__AVR_ATtiny4313__)
-	#define VERSION      200
-#endif
-#define VERSION_SUB      212
+ 
+
+#define VERSION      200
+#define VERSION_SUB    5
 
 #define F_CPU         16000000L
 
@@ -157,23 +155,7 @@ volatile uint8_t bitmask = 0;
  *  	-  TODO: overit dobu trvani preruseni pri I2C komunikaci
  */
 
-#if (PWM_FREQ == 480) //test version
-#define LOOP_COUNT 9
-#define MAX_LOOP   LOOP_COUNT-1
-const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
-const uint16_t tbl_loop_len[LOOP_COUNT] = {3069,5117,6141,10237,14333,22525,26621,30717,32765};
-#define WAIT_0 8
-#define WAIT_1 16
-#define WAIT_2 25
-#define WAIT_3 57
-#define WAIT_4 121
-#define WAIT_5 249
-#define WAIT_6a 249
-#define WAIT_6b 249
-#define WAIT_7a 249
-#define WAIT_7b 505
-#define WAIT_7c 249
-#else
+
 #define LOOP_COUNT 9
 #define MAX_LOOP   LOOP_COUNT-1
 const uint8_t tbl_loop_bitmask[LOOP_COUNT] = { 8, 9, 8, 11, 10, 11, 10, 11, 9 };
@@ -189,7 +171,7 @@ const uint16_t tbl_loop_len[LOOP_COUNT] = { 6133, 10229, 12277, 20469, 28661, 45
 #define WAIT_7a  505
 #define WAIT_7b  1017
 #define WAIT_7c  505
-#endif
+
 
 int16_t incLedValues[PWM_CHANNELS + 1] = { 0 };
 int16_t actLedValues[PWM_CHANNELS] = { 0 };
@@ -211,7 +193,6 @@ int16_t tmp;
 
 unsigned long milis_time = 0;
 
-#if (VERSION == 200)
 //interpolace s mezemi min a max, 8bit
 static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 		uint8_t out_min, uint8_t out_max) {
@@ -219,20 +200,8 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 			+ out_min;
 	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
-static int16_t map(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max) {
-	int32_t tmp1 = (x - in_min) * (out_max - out_min);
-	int16_t tmp2 = in_max - in_min;
-	return (tmp1 / tmp2) + out_min;
-}
-#endif
 
 
-/*
-//linear interpolation
-static inline long map(long x, long in_min, long in_max, long out_min,
-		long out_max) {
-	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}*/
 
 /*
  * NO-PWM / bit angle modulation
@@ -319,14 +288,26 @@ ISR(TIMER1_COMPB_vect) {
 
 }
 
+uint32_t l = 0;
+uint8_t r = 0;
+int16_t led_r = 0;
+
 void pwm_update(void) {
+	
 	//clear
+	l = 0;
+	r = 0;
+	led_r = 0;
 	memset(_d_b, 0, 12);
+					
 	//rearrange values to ports
 	for (int i = 0; i < PWM_BITS; i++) {
 		for (int j = 0; j < PWM_CHANNELS; j++) {
+			r = pgm_read_byte(&sw_resistor[j]);
+			l = (uint32_t)(actLedValues[j]) * r;
+			led_r = l/100UL;
 			_d_b[(PWM_BITS - 1) - i] = (_d_b[(PWM_BITS - 1) - i] << 1)
-					| (((actLedValues[j]) >> ((PWM_BITS - 1) - i)) & 0x01);
+					| (((led_r) >> ((PWM_BITS - 1) - i)) & 0x01);
 		}
 	}
 
@@ -338,7 +319,6 @@ void pwm_update(void) {
 	newData = 1;
 }
 
-#if (VERSION == 200)
 /*
  * Rutiny pro teplomer
  *
@@ -445,8 +425,6 @@ static void therm_write_byte(uint8_t byte) {
 		byte >>= 1;
 	}
 }
-
-#endif
 
 
 /*
@@ -653,11 +631,8 @@ if (!(PINB & (1 << PB6))) {
 	TIFR |= (1 << TOV0);
 	TIMSK |= (1 << TOIE0);
 
-#if (PRESCALER == 64L)
-	TCCR0B |= (1 << CS01) | (1 << CS00); // prescale 64
-#else
 	TCCR0B |= (1 << CS01); // prescale 8
-#endif
+
 	//fast PWM
 	TCCR0A |= (1 << COM0A1) | (1 << WGM00) | (1 << WGM01);
 
@@ -673,7 +648,6 @@ if (!(PINB & (1 << PB6))) {
 
 	sei();
 
-#if (VERSION == 200)
 	set_fan(255);
 	_delay_ms(2000);
 	set_fan(0);
@@ -698,7 +672,7 @@ if (!(PINB & (1 << PB6))) {
 		while (!therm_read_bit())
 			;
 	}
-#endif
+
 
 #define MASTER_TIMEOUT  2 //sec
 	//cekej  na pwm_status from master
@@ -720,7 +694,7 @@ if (!(PINB & (1 << PB6))) {
 	while (1) {
 		wdt_reset();
 
-#if (VERSION == 200)
+
 		/*
 		 * Mereni teploty
 		 */
@@ -780,15 +754,6 @@ if (!(PINB & (1 << PB6))) {
 			}
 		}
 
-#else //tiny 2313
-	if (checkActLedVal() == 0) {
-				set_fan(0);
-			} else {
-				set_fan(FAN_MAX);
-			}
-#endif 
-
-
 		/*
 		 *  Hlavni rizeni
 		 */
@@ -817,10 +782,10 @@ if (!(PINB & (1 << PB6))) {
 			//test. provoz
 			//zapne kazdou led na testovaci hodnotu			
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				actLedValues[i] = 1000;				
+				actLedValues[i] = 100;				
 			}
-			//updateStart = 1;			
 			pwm_update();
+			updateStart = 2;			
 		}
 
 		if (updateStart == 1) {
@@ -831,9 +796,6 @@ if (!(PINB & (1 << PB6))) {
 				for (uint8_t x = 0; x < PWM_CHANNELS; x++) {
 					int16_t tmp = istep * (p_ledValues[x] - p_prevLedValues[x]);
 					actLedValues[x] =  p_prevLedValues[x] + (  tmp / ISTEPS);	
-					//softwarove omezeni proudu
-					uint8_t res = pgm_read_byte(&sw_resistor[x]);
-					actLedValues[x] = (actLedValues[x] * res)/100;
 					//omezeni pri prehrati ?? :TODO
 					//actLedValues[x] = overheat?actLedValues[x] / 2:actLedValues[x];			
 				}				
