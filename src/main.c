@@ -322,6 +322,8 @@ static uint8_t checkActLedVal() {
 	return lv;
 }
 
+ISR(TIMER0_OVF_vect) {}
+
 /**************************************
  * Main routine
  *************************************/
