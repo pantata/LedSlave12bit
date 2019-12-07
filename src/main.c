@@ -784,8 +784,10 @@ if (!(PINB & (1 << PB6))) {
 			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
 				actLedValues[i] = 100;				
 			}
-			pwm_update();
-			updateStart = 2;			
+			if (updateStart == 0) {
+				pwm_update();
+				updateStart = 2;
+			}
 		}
 
 		if (updateStart == 1) {
