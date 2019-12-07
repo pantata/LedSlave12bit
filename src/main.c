@@ -16,7 +16,7 @@
 
  
 #define VERSION      100
-#define VERSION_SUB  2
+#define VERSION_SUB  6
 
 #define F_CPU         16000000L
 
