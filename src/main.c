@@ -66,11 +66,11 @@ int16_t val, nval = 0;
 
 //sw resistor - set max current for channel
 // Rs resitor = 0.1 Ohm
-// uv, rb, white, red, green, yellow, blue
+// blue, yellow, green, red, white, rb, uv
 // 
 //na konektoru zleva, pohled shora, konektor smeruje ke me,
 // Iout = (0.1 * D) /  Rs
-const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {35,100,100,100,100,70,70};
+const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {70,70,100,100,100,100,35};
 
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
