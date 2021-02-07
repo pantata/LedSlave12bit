@@ -123,7 +123,7 @@ int16_t val, nval = 0;
 
 //sw resistor - set max current for channel
 // Rs resitor = 0.1 Ohm
-// uv, rb, white, red, green, yellow, blue
+// blue, yellow, white, red, green, rb, uv
 // Iout = (0.1 * D) /  Rs
 
 #define RAMPUPTIME 180
@@ -131,7 +131,7 @@ int16_t val, nval = 0;
 #define RAMPDOWNTIME 720
 #define MOONTIME 1080
 
-const uint16_t ledValues[] PROGMEM = {4000,600,600,100,400,4000,4000,10 };
+const uint16_t ledValues[] PROGMEM = {4000,600,500,100,400,4000,4000,10 };
 const uint16_t dayTimes[] PROGMEM = { RAMPUPTIME,MAXLIGHTTIME,RAMPDOWNTIME,MOONTIME}; //ramp up, max, ramp down, moon
 const uint8_t sw_resistor[] PROGMEM = {100,70,100,70,100,100,35};
 
@@ -789,10 +789,9 @@ if (!(PINB & (1 << PB6))) {
 		} else  if (pwm_status == DEMO) {
 			//test. provoz
 			//zapne kazdou led na testovaci hodnotu	
-			if (milis_time - day_milis > 60000) {
+			if ((milis_time - day_milis) > 60000) {
 				day_milis = milis_time;
-				daytime++;
-				daytime = daytime % 1440;
+				daytime = (++daytime) % 1440;
 				uint8_t i;
 				memset(p_incLedValues,0,sizeof(actLedValues));
 
@@ -800,16 +799,19 @@ if (!(PINB & (1 << PB6))) {
 					for (i = 0; i < PWM_CHANNELS; i++) {
 						p_incLedValues[i] = map(daytime,0,rampUpTime,0,pgm_read_word((uint16_t*)&ledValues[i]));
 					}
-				} else if (daytime <= maxLightTime) {
+				}
+				if (daytime > rampUpTime && daytime <= maxLightTime) {
 					for (i = 0; i < PWM_CHANNELS; i++) {
 						p_incLedValues[i] = pgm_read_word((uint16_t*)&ledValues[i]);
 					}
-				} else if (daytime <= rampDownTime) {
+				}
+				if (daytime > maxLightTime && daytime <= rampDownTime) {
 					for ( i = 0; i < PWM_CHANNELS; i++) {
 						p_incLedValues[i] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[i]),0);
 					}
 					p_incLedValues[MOONLED] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[MOONLED]),pgm_read_word((uint16_t*)&ledValues[7]));
-				}  else if (daytime <= moonTime) {
+				}
+				if (daytime > rampDownTime && daytime <= moonTime) {
 					p_incLedValues[MOONLED] = map(daytime,rampDownTime,moonTime,pgm_read_word((uint16_t*)&ledValues[7]),0);
 				}
 				int16_t *tmpptr = p_prevLedValues;
