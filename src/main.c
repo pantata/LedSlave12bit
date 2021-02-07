@@ -16,7 +16,7 @@
  
 
 #define VERSION      200
-#define VERSION_SUB    6
+#define VERSION_SUB    7
 
 #define F_CPU         16000000L
 
@@ -131,7 +131,7 @@ int16_t val, nval = 0;
 #define RAMPDOWNTIME 720
 #define MOONTIME 1080
 
-const uint16_t ledValues[] PROGMEM = {4000,600,500,100,400,4000,4000,10 };
+const uint16_t ledVals[] PROGMEM = {4000,600,500,100,400,4000,4000,10 };
 const uint16_t dayTimes[] PROGMEM = { RAMPUPTIME,MAXLIGHTTIME,RAMPDOWNTIME,MOONTIME}; //ramp up, max, ramp down, moon
 const uint8_t sw_resistor[] PROGMEM = {100,70,100,70,100,100,35};
 
@@ -797,22 +797,22 @@ if (!(PINB & (1 << PB6))) {
 
 				if (daytime <= rampUpTime) {
 					for (i = 0; i < PWM_CHANNELS; i++) {
-						p_incLedValues[i] = map(daytime,0,rampUpTime,0,pgm_read_word((uint16_t*)&ledValues[i]));
+						p_incLedValues[i] = map(daytime,0,rampUpTime,0,pgm_read_word((uint16_t*)&ledVals[i]));
 					}
 				}
 				if (daytime > rampUpTime && daytime <= maxLightTime) {
 					for (i = 0; i < PWM_CHANNELS; i++) {
-						p_incLedValues[i] = pgm_read_word((uint16_t*)&ledValues[i]);
+						p_incLedValues[i] = pgm_read_word((uint16_t*)&ledVals[i]);
 					}
 				}
 				if (daytime > maxLightTime && daytime <= rampDownTime) {
 					for ( i = 0; i < PWM_CHANNELS; i++) {
-						p_incLedValues[i] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[i]),0);
+						p_incLedValues[i] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledVals[i]),0);
 					}
-					p_incLedValues[MOONLED] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[MOONLED]),pgm_read_word((uint16_t*)&ledValues[7]));
+					p_incLedValues[MOONLED] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledVals[MOONLED]),pgm_read_word((uint16_t*)&ledVals[7]));
 				}
 				if (daytime > rampDownTime && daytime <= moonTime) {
-					p_incLedValues[MOONLED] = map(daytime,rampDownTime,moonTime,pgm_read_word((uint16_t*)&ledValues[7]),0);
+					p_incLedValues[MOONLED] = map(daytime,rampDownTime,moonTime,pgm_read_word((uint16_t*)&ledVals[7]),0);
 				}
 				int16_t *tmpptr = p_prevLedValues;
 				p_prevLedValues = p_ledValues;
