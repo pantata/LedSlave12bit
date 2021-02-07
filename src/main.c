@@ -119,12 +119,21 @@ int16_t val, nval = 0;
 #define LED_DIR       DDRD   // Register for PWM
 #define PWM_BITS      12
 #define PWM_CHANNELS  7
+#define MOONLED       5
 
 //sw resistor - set max current for channel
 // Rs resitor = 0.1 Ohm
 // uv, rb, white, red, green, yellow, blue
 // Iout = (0.1 * D) /  Rs
-const uint8_t sw_resistor[PWM_CHANNELS] PROGMEM= {70,70,100,100,100,100,35};
+
+#define RAMPUPTIME 180
+#define MAXLIGHTTIME 540
+#define RAMPDOWNTIME 720
+#define MOONTIME 1080
+
+const uint16_t ledValues[] PROGMEM = {4000,600,600,100,400,4000,4000,10 };
+const uint16_t dayTimes[] PROGMEM = { RAMPUPTIME,MAXLIGHTTIME,RAMPDOWNTIME,MOONTIME}; //ramp up, max, ramp down, moon
+const uint8_t sw_resistor[] PROGMEM = {100,70,100,70,100,100,35};
 
 volatile uint8_t loop = 0;
 volatile uint8_t bitmask = 0;
@@ -192,6 +201,8 @@ volatile uint8_t effect = 0;
 int16_t tmp;
 
 unsigned long milis_time = 0;
+unsigned long day_milis = 0;
+uint16_t daytime = 0;
 
 //interpolace s mezemi min a max, 8bit
 static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
@@ -201,7 +212,9 @@ static uint8_t map_minmax(uint8_t x, uint8_t in_min, uint8_t in_max,
 	return (uint8_t) (ret > out_max ? out_max : ret < out_min ? out_min : ret);
 }
 
-
+long map(long x, long in_min, long in_max, long out_min, long out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 /*
  * NO-PWM / bit angle modulation
@@ -288,35 +301,25 @@ ISR(TIMER1_COMPB_vect) {
 
 }
 
-uint32_t l = 0;
-uint8_t r = 0;
-int16_t led_r = 0;
-
-void pwm_update(void) {
-	
-	//clear
-	l = 0;
-	r = 0;
-	led_r = 0;
-	memset(_d_b, 0, 12);
-					
-	//rearrange values to ports
-	for (int i = 0; i < PWM_BITS; i++) {
-		for (int j = 0; j < PWM_CHANNELS; j++) {
-			r = pgm_read_byte(&sw_resistor[j]);
-			l = (uint32_t)(actLedValues[j]) * r;
-			led_r = l/100UL;
-			_d_b[(PWM_BITS - 1) - i] = (_d_b[(PWM_BITS - 1) - i] << 1)
-					| (((led_r) >> ((PWM_BITS - 1) - i)) & 0x01);
-		}
-	}
-
-	//wait for prev. data process
-	while (newData) {
-		;
-	};
-	//set new data flag
-	newData = 1;
+static void pwm_update(void) {
+    //clear
+    uint16_t l = 0;
+    uint8_t i,j;
+    memset(_d_b, 0, 12);                    
+    //rearrange values to ports
+    for (i = 0; i < PWM_BITS; i++) {
+        for (j = 0; j < PWM_CHANNELS; j++) {
+            l = ((uint32_t)(actLedValues[j]) * pgm_read_byte(&sw_resistor[j])/100);
+            _d_b[(PWM_BITS - 1) - i] = (_d_b[(PWM_BITS - 1) - i] << 1)
+                    | (((l) >> ((PWM_BITS - 1) - i)) & 0x01);
+        }
+    }
+    //wait for prev. data process
+    while (newData) {
+        ;
+    };
+    //set new data flag
+    newData = 1;
 }
 
 /*
@@ -648,6 +651,11 @@ if (!(PINB & (1 << PB6))) {
 
 	sei();
 
+    uint16_t rampUpTime = pgm_read_word((uint16_t*)&dayTimes[0]);
+    uint16_t maxLightTime = rampUpTime + pgm_read_word((uint16_t*)&dayTimes[1]);
+    uint16_t rampDownTime = maxLightTime + pgm_read_word((uint16_t*)&dayTimes[2]);
+    uint16_t moonTime = rampDownTime + pgm_read_word((uint16_t*)&dayTimes[3]);
+    
 	set_fan(255);
 	_delay_ms(2000);
 	set_fan(0);
@@ -780,13 +788,36 @@ if (!(PINB & (1 << PB6))) {
 			}		
 		} else  if (pwm_status == DEMO) {
 			//test. provoz
-			//zapne kazdou led na testovaci hodnotu			
-			for (uint8_t i = 0; i < PWM_CHANNELS; i++) {
-				actLedValues[i] = 100;				
-			}
-			if (updateStart == 0) {
-				pwm_update();
-				updateStart = 2;
+			//zapne kazdou led na testovaci hodnotu	
+			if (milis_time - day_milis > 60000) {
+				day_milis = milis_time;
+				daytime++;
+				daytime = daytime % 1440;
+				uint8_t i;
+				memset(p_incLedValues,0,sizeof(actLedValues));
+
+				if (daytime <= rampUpTime) {
+					for (i = 0; i < PWM_CHANNELS; i++) {
+						p_incLedValues[i] = map(daytime,0,rampUpTime,0,pgm_read_word((uint16_t*)&ledValues[i]));
+					}
+				} else if (daytime <= maxLightTime) {
+					for (i = 0; i < PWM_CHANNELS; i++) {
+						p_incLedValues[i] = pgm_read_word((uint16_t*)&ledValues[i]);
+					}
+				} else if (daytime <= rampDownTime) {
+					for ( i = 0; i < PWM_CHANNELS; i++) {
+						p_incLedValues[i] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[i]),0);
+					}
+					p_incLedValues[MOONLED] = map(daytime,maxLightTime,rampDownTime,pgm_read_word((uint16_t*)&ledValues[MOONLED]),pgm_read_word((uint16_t*)&ledValues[7]));
+				}  else if (daytime <= moonTime) {
+					p_incLedValues[MOONLED] = map(daytime,rampDownTime,moonTime,pgm_read_word((uint16_t*)&ledValues[7]),0);
+				}
+				int16_t *tmpptr = p_prevLedValues;
+				p_prevLedValues = p_ledValues;
+				p_ledValues = p_incLedValues;
+				p_incLedValues = tmpptr;
+				//priznak startu interpolace
+				updateStart=1;
 			}
 		}
 
